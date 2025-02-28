@@ -1,0 +1,9 @@
+[package]
+name = "rspn"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bigdecimal = "0"
+ratatui = "0"
+crossterm = "0"
