@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Flex, Layout},
     style::{Color, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Cell, Clear, Paragraph, Row, Table},
+    widgets::{Block, Cell, Clear, Paragraph, Row, Table, Wrap},
     Frame,
 };
 use serde::{Deserialize, Serialize};
@@ -41,13 +41,13 @@ const HELP_MSG: &str = r#"
 Helix Calc is a simple Reverse Polish Notation calculator.
 
 Type numbers followed by <Enter> to push them on the stack.
+
 Use the following commands to operate on the stack:
 
 - +, -, *, / : perform the operation on the top two values
 - P : pop the top value off the stack.
 
-The name is inspired by Helix Editor, and the functionality
-by the venerable GNU dc.
+The name is inspired by Helix Editor, and the functionality by the venerable GNU dc.
 "#;
 
 #[derive(Serialize, Deserialize, Default)]
@@ -232,8 +232,9 @@ impl<'a> App<'a> {
             let [area] = horizontal.areas(area);
             frame.render_widget(Clear, area);
 
-            let help_txt =
-                Paragraph::new(Text::from(HELP_MSG)).block(Block::bordered().title(" Help"));
+            let help_txt = Paragraph::new(Text::from(HELP_MSG))
+                .block(Block::bordered().title(" Help"))
+                .wrap(Wrap { trim: false });
             frame.render_widget(help_txt, area);
         }
     }
@@ -264,7 +265,7 @@ fn config_file() -> anyhow::Result<PathBuf> {
 
 #[cfg(unix)]
 fn config_file() -> anyhow::Result<PathBuf> {
-    Ok(PathBuf::from(env::var("HOME"))
+    Ok(PathBuf::from(env::var("HOME")?)
         .join(".config")
         .join("helix-calc")
         .join("state.json"))
