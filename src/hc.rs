@@ -27,8 +27,9 @@ Type numbers followed by <Enter> to push them on the stack.
 
 Use the following commands to operate on the stack:
 
-- +, -, *, / : perform the operation on the top two values
+- +, -, *, / : perform the operation on the top two values.
 - P : pop the top value off the stack.
+- d : duplicate the top value.
 
 The name is inspired by Helix Editor, and the functionality by the venerable GNU dc.
 "#;
@@ -102,6 +103,12 @@ impl<'a> App<'a> {
                     KeyCode::Char('P') => {
                         self.stack.pop_front();
                     }
+                    KeyCode::Char('d') => {
+                        if let Some(v) = self.stack.pop_front() {
+                            self.stack.push_front(v.clone());
+                            self.stack.push_front(v);
+                        }
+                    }
                     KeyCode::Enter => {
                         self.consume();
                     }
@@ -140,44 +147,44 @@ impl<'a> App<'a> {
             "<Q> ".blue().bold(),
         ])
         .centered()
+        .bg(Color::Black)
     }
 
     fn stack(&self, area: &Rect) -> impl Widget {
         let stack: Vec<Row<'_>> = (1..=area.height)
             .rev()
             .map(|index| {
-                let idx = Cell::from(Text::from(
-                    Span::from(format!("{}", index))
-                        .italic()
-                        .into_right_aligned_line(),
-                ));
                 let stack_index = (index as usize) - 1;
-                let val = if stack_index < self.stack.len() {
-                    format!("{}", self.stack[stack_index])
+                let [val, idx] = if stack_index < self.stack.len() {
+                    [
+                        Span::from(format!("{}", self.stack[stack_index])),
+                        Span::from(format!("{}", index)).style(Color::White),
+                    ]
                 } else {
-                    "".into()
+                    [Span::from(""), Span::from("")]
                 };
                 Row::new(vec![
-                    Cell::from(Span::from(val).bold().into_right_aligned_line()),
-                    idx,
+                    Cell::from(val.bold().into_right_aligned_line()),
+                    Cell::from(idx.into_right_aligned_line()),
                 ])
             })
             .collect();
-        Table::new(stack, [Constraint::Percentage(100), Constraint::Length(5)]).column_spacing(1)
+        Table::new(stack, [Constraint::Percentage(100), Constraint::Length(5)])
+            .column_spacing(1)
+            .bg(Color::Black)
     }
 
     fn render_input(&mut self, frame: &mut Frame, area: Rect) {
-        self.textarea
-            .set_block(Block::bordered().border_style(if self.valid {
-                Color::White
-            } else {
-                Color::Red
-            }));
+        self.textarea.set_block(
+            Block::bordered()
+                .border_style(if self.valid { Color::White } else { Color::Red })
+                .bg(Color::Black),
+        );
         frame.render_widget(&self.textarea, area);
     }
 
     fn status(&self) -> impl Widget {
-        Text::from(format!("stack: {}", self.stack.len()))
+        Text::from(format!("stack: {}", self.stack.len())).bg(Color::Black)
     }
 
     fn render_help(&self, frame: &mut Frame) {
@@ -188,7 +195,7 @@ impl<'a> App<'a> {
         frame.render_widget(Clear, area);
 
         let help_txt = Paragraph::new(Text::from(HELP_MSG))
-            .block(Block::bordered().title(" Help"))
+            .block(Block::bordered().title(" Help").bg(Color::Black))
             .wrap(Wrap { trim: false });
         frame.render_widget(help_txt, area);
     }
