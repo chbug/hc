@@ -1,18 +1,23 @@
 use std::{collections::VecDeque, str::FromStr};
 
-use bigdecimal::{BigDecimal, BigDecimalRef, ParseBigDecimalError};
+use bigdecimal::{BigDecimal, ParseBigDecimalError, ToPrimitive, Zero};
 use thiserror::Error;
 
 use crate::state::State;
 
 pub struct Stack {
     s: VecDeque<BigDecimal>,
+    precision: u64,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum StackError {
     #[error("Operation requires {0} elements")]
     MissingValue(usize),
+    #[error("Even I can't divide by zero")]
+    DivByZero,
+    #[error("Invalid range for operation")]
+    InvalidRange,
 }
 
 #[derive(Debug, Clone)]
@@ -22,18 +27,27 @@ pub enum Op {
     Subtract,
     Multiply,
     Divide,
+    Modulo,
+    Sqrt,
     Duplicate,
     Pop,
+    Precision,
 }
 
 impl Stack {
     #[cfg(test)]
     pub fn new() -> Stack {
-        Stack { s: VecDeque::new() }
+        Stack {
+            s: VecDeque::new(),
+            precision: 12,
+        }
     }
 
     pub fn from(values: Vec<BigDecimal>) -> Stack {
-        Stack { s: values.into() }
+        Stack {
+            s: values.into(),
+            precision: 12,
+        }
     }
 
     pub fn apply(&mut self, op: Op) -> Result<(), StackError> {
@@ -54,8 +68,28 @@ impl Stack {
                 self.s.push_front(a * b);
             }
             Op::Divide => {
-                let [b, a] = self.pop()?;
+                let [b, a] = self.check_and_pop(|stack: &[BigDecimal; 2]| {
+                    if stack[0] == BigDecimal::zero() {
+                        Err(StackError::DivByZero)
+                    } else {
+                        Ok(())
+                    }
+                })?;
                 self.s.push_front(a / b);
+            }
+            Op::Modulo => {
+                let [b, a] = self.pop()?;
+                self.s.push_front(a % b);
+            }
+            Op::Sqrt => {
+                let [a] = self.check_and_pop(|stack: &[BigDecimal; 1]| {
+                    if stack[0] < BigDecimal::zero() {
+                        Err(StackError::InvalidRange)
+                    } else {
+                        Ok(())
+                    }
+                })?;
+                self.s.push_front(a.sqrt().unwrap());
             }
             Op::Duplicate => {
                 let [a] = self.pop()?;
@@ -65,15 +99,39 @@ impl Stack {
             Op::Pop => {
                 self.pop::<1>()?;
             }
+            Op::Precision => {
+                let [a] = self.check_and_pop(|stack: &[BigDecimal; 1]| {
+                    if stack[0] <= BigDecimal::zero() || stack[0] > i64::MAX.into() {
+                        Err(StackError::InvalidRange)
+                    } else {
+                        Ok(())
+                    }
+                })?;
+                self.precision = a.to_u64().unwrap();
+            }
         }
         Ok(())
     }
 
-    pub fn snapshot(&self) -> Vec<BigDecimalRef> {
-        self.s.iter().map(|v| v.to_ref()).collect()
+    pub fn snapshot(&self) -> Vec<BigDecimal> {
+        // Ensure the scale does not exceed the precision, but don't force
+        // it on all numbers as displaying 1.0000000000 is annoying.
+        self.s
+            .iter()
+            .map(|v| {
+                if v.digits() > self.precision {
+                    v.with_scale(self.precision as i64)
+                } else {
+                    v.clone()
+                }
+            })
+            .collect()
     }
 
-    fn pop<const C: usize>(&mut self) -> Result<[BigDecimal; C], StackError> {
+    fn check_and_pop<const C: usize, F: Fn(&[BigDecimal; C]) -> Result<(), StackError>>(
+        &mut self,
+        validator: F,
+    ) -> Result<[BigDecimal; C], StackError> {
         if self.s.len() < C {
             return Err(StackError::MissingValue(C));
         }
@@ -84,8 +142,13 @@ impl Stack {
             .collect::<Vec<BigDecimal>>()
             .try_into()
             .unwrap();
+        validator(&result)?;
         self.s.drain(0..C);
         Ok(result)
+    }
+
+    fn pop<const C: usize>(&mut self) -> Result<[BigDecimal; C], StackError> {
+        self.check_and_pop(|_| Ok(()))
     }
 }
 
@@ -111,7 +174,7 @@ mod tests {
         s.apply(Op::Push(10.into()))?;
         s.apply(Op::Push(20.into()))?;
         s.apply(Op::Add)?;
-        assert_eq!(s.snapshot(), vec![BigDecimal::from(30).to_ref()]);
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(30)]);
         Ok(())
     }
 
@@ -121,7 +184,7 @@ mod tests {
         s.apply(Op::Push(10.into()))?;
         s.apply(Op::Push(20.into()))?;
         s.apply(Op::Subtract)?;
-        assert_eq!(s.snapshot(), vec![BigDecimal::from(-10).to_ref()]);
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(-10)]);
         Ok(())
     }
 
@@ -131,7 +194,7 @@ mod tests {
         s.apply(Op::Push(10.into()))?;
         s.apply(Op::Push(20.into()))?;
         s.apply(Op::Multiply)?;
-        assert_eq!(s.snapshot(), vec![BigDecimal::from(200).to_ref()]);
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(200)]);
         Ok(())
     }
 
@@ -141,7 +204,43 @@ mod tests {
         s.apply(Op::Push(20.into()))?;
         s.apply(Op::Push(10.into()))?;
         s.apply(Op::Divide)?;
-        assert_eq!(s.snapshot(), vec![BigDecimal::from(2).to_ref()]);
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(2)]);
+        Ok(())
+    }
+
+    #[test]
+    fn divide_by_zero() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(20.into()))?;
+        s.apply(Op::Push(0.into()))?;
+        assert_eq!(s.apply(Op::Divide), Err(StackError::DivByZero));
+        Ok(())
+    }
+
+    #[test]
+    fn rem() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(7.into()))?;
+        s.apply(Op::Push(3.into()))?;
+        s.apply(Op::Modulo)?;
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(1)]);
+        Ok(())
+    }
+
+    #[test]
+    fn sqrt() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(4.into()))?;
+        s.apply(Op::Sqrt)?;
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(2)]);
+        Ok(())
+    }
+
+    #[test]
+    fn sqrt_of_negative() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push((-4).into()))?;
+        assert_eq!(s.apply(Op::Sqrt), Err(StackError::InvalidRange));
         Ok(())
     }
 
@@ -150,10 +249,7 @@ mod tests {
         let mut s = Stack::new();
         s.apply(Op::Push(1.into()))?;
         s.apply(Op::Duplicate)?;
-        assert_eq!(
-            s.snapshot(),
-            vec![BigDecimal::from(1).to_ref(), BigDecimal::from(1).to_ref()]
-        );
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(1), BigDecimal::from(1)]);
         Ok(())
     }
 

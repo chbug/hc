@@ -32,9 +32,11 @@ Type numbers followed by <Enter> to push them on the stack.
 
 Use the following commands to operate on the stack:
 
-- +, -, *, / : perform the operation on the top two values.
+- +, -, *, /, % : perform the operation on the top two values.
 - P : pop the top value off the stack.
 - d : duplicate the top value.
+- v : compute the square root of the top value.
+- k : pop the top value and use it to set the precision.
 
 The name is inspired by Helix Editor, and the functionality by the venerable GNU dc.
 "#;
@@ -52,8 +54,11 @@ impl App<'_> {
                 ('-', Op::Subtract),
                 ('/', Op::Divide),
                 ('*', Op::Multiply),
+                ('%', Op::Modulo),
+                ('v', Op::Sqrt),
                 ('d', Op::Duplicate),
                 ('P', Op::Pop),
+                ('k', Op::Precision),
             ]),
             op_status: Ok(()),
         })
@@ -179,7 +184,7 @@ impl App<'_> {
         let status = match &self.op_status {
             Ok(_) => {
                 if self.empty_input() {
-                    "Ok".into()
+                    "".into()
                 } else if self.value().is_some() {
                     "<Enter> to add to the stack".into()
                 } else {
