@@ -1,4 +1,4 @@
-use bigdecimal::{BigDecimal, Zero};
+use bigdecimal::BigDecimal;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
@@ -7,17 +7,22 @@ use ratatui::{
     widgets::{Block, Cell, Clear, Paragraph, Row, Table, Widget, Wrap},
     Frame,
 };
-use std::{collections::VecDeque, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 use tui_textarea::TextArea;
 
-use crate::state::State;
+use crate::{
+    stack::{Op, Stack, StackError},
+    state::State,
+};
 
 pub struct App<'a> {
     exit: bool,
     valid: bool,
     textarea: TextArea<'a>,
-    stack: VecDeque<BigDecimal>,
+    stack: Stack,
     help: bool,
+    ops: HashMap<char, Op>,
+    op_status: Result<(), StackError>,
 }
 
 const HELP_MSG: &str = r#"
@@ -34,14 +39,23 @@ Use the following commands to operate on the stack:
 The name is inspired by Helix Editor, and the functionality by the venerable GNU dc.
 "#;
 
-impl<'a> App<'a> {
-    pub fn new(state: &State) -> anyhow::Result<Self> {
+impl App<'_> {
+    pub fn new(state: State) -> anyhow::Result<Self> {
         Ok(App {
             exit: false,
             valid: true,
             textarea: TextArea::default(),
             stack: state.try_into()?,
             help: false,
+            ops: HashMap::from([
+                ('+', Op::Add),
+                ('-', Op::Subtract),
+                ('/', Op::Divide),
+                ('*', Op::Multiply),
+                ('d', Op::Duplicate),
+                ('P', Op::Pop),
+            ]),
+            op_status: Ok(()),
         })
     }
 
@@ -60,8 +74,12 @@ impl<'a> App<'a> {
         (&self.stack).into()
     }
 
+    fn empty_input(&self) -> bool {
+        self.textarea.lines()[0].is_empty()
+    }
+
     fn handle_events(&mut self) -> std::io::Result<()> {
-        let empty = self.textarea.lines()[0].is_empty();
+        let empty = self.empty_input();
         match crossterm::event::read()? {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 // Keep TextArea as a single-line entry.
@@ -74,46 +92,19 @@ impl<'a> App<'a> {
                     KeyCode::Char('q') => {
                         self.exit = true;
                     }
-                    KeyCode::Char(c) if "+-/*".contains(c) => {
-                        // We only accept operations with an empty buffer: this allows
-                        // for negative signs mostly.
-                        if self.stack.len() >= 2 && empty {
-                            let b = self.stack.pop_front().unwrap();
-                            let a = self.stack.pop_front().unwrap();
-                            match c {
-                                '+' => self.stack.push_front(a + b),
-                                '-' => self.stack.push_front(a - b),
-                                '*' => self.stack.push_front(a * b),
-                                '/' => {
-                                    if b != BigDecimal::zero() {
-                                        self.stack.push_front(a / b);
-                                    } else {
-                                        self.stack.push_front(a);
-                                        self.stack.push_front(b);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        } else if c == '-' && !empty {
-                            if let Some(v) = self.value() {
-                                self.textarea = TextArea::from([format!("{}", -v)]);
-                            }
-                        }
-                    }
-                    KeyCode::Char('P') => {
-                        self.stack.pop_front();
-                    }
-                    KeyCode::Char('d') => {
-                        if let Some(v) = self.stack.pop_front() {
-                            self.stack.push_front(v.clone());
-                            self.stack.push_front(v);
-                        }
-                    }
                     KeyCode::Enter => {
                         self.consume();
                     }
                     KeyCode::Char('?') => {
                         self.help = !self.help;
+                    }
+                    KeyCode::Char('-') if !empty => {
+                        if let Some(v) = self.value() {
+                            self.textarea = TextArea::from([format!("{}", -v)]);
+                        }
+                    }
+                    KeyCode::Char(c) if empty && self.ops.contains_key(&c) => {
+                        self.op_status = self.stack.apply(self.ops[&c].clone());
                     }
                     _ => {
                         self.textarea.input(key_event);
@@ -127,13 +118,13 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    fn value(&mut self) -> Option<BigDecimal> {
+    fn value(&self) -> Option<BigDecimal> {
         BigDecimal::from_str(&self.textarea.lines()[0]).ok()
     }
 
     fn consume(&mut self) {
         if let Some(v) = self.value() {
-            self.stack.push_front(v);
+            self.op_status = self.stack.apply(Op::Push(v));
             self.textarea = TextArea::default();
         }
     }
@@ -151,13 +142,14 @@ impl<'a> App<'a> {
     }
 
     fn stack(&self, area: &Rect) -> impl Widget {
+        let snapshot = self.stack.snapshot();
         let stack: Vec<Row<'_>> = (1..=area.height)
             .rev()
             .map(|index| {
                 let stack_index = (index as usize) - 1;
-                let [val, idx] = if stack_index < self.stack.len() {
+                let [val, idx] = if stack_index < snapshot.len() {
                     [
-                        Span::from(format!("{}", self.stack[stack_index])),
+                        Span::from(format!("{}", snapshot[stack_index])),
                         Span::from(format!("{}", index)).style(Color::White),
                     ]
                 } else {
@@ -184,7 +176,19 @@ impl<'a> App<'a> {
     }
 
     fn status(&self) -> impl Widget {
-        Text::from(format!("stack: {}", self.stack.len())).bg(Color::Black)
+        let status = match &self.op_status {
+            Ok(_) => {
+                if self.empty_input() {
+                    "Ok".into()
+                } else if self.value().is_some() {
+                    "<Enter> to add to the stack".into()
+                } else {
+                    "Input is not a valid number".into()
+                }
+            }
+            Err(err) => err.to_string(),
+        };
+        Text::from(status).bg(Color::Black)
     }
 
     fn render_help(&self, frame: &mut Frame) {
@@ -200,7 +204,7 @@ impl<'a> App<'a> {
         frame.render_widget(help_txt, area);
     }
 
-    fn render(&mut self, frame: &mut Frame) -> () {
+    fn render(&mut self, frame: &mut Frame) {
         let [page] = Layout::horizontal([Constraint::Length(50)])
             .flex(Flex::Center)
             .areas(frame.area());

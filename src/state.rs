@@ -1,37 +1,24 @@
 use anyhow::Context;
-use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::VecDeque,
     env,
     fs::{self, File},
     io::Write,
     path::PathBuf,
-    str::FromStr,
 };
+
+use crate::stack::Stack;
 
 /// Permanent state of the app.
 #[derive(Serialize, Deserialize, Default)]
 pub struct State {
-    stack: Vec<String>,
+    pub stack: Vec<String>,
 }
 
-impl TryFrom<&State> for VecDeque<BigDecimal> {
-    type Error = ParseBigDecimalError;
-
-    fn try_from(value: &State) -> Result<Self, Self::Error> {
-        let mut result = VecDeque::new();
-        for v in &value.stack {
-            result.push_back(BigDecimal::from_str(v)?);
-        }
-        Ok(result)
-    }
-}
-
-impl From<&VecDeque<BigDecimal>> for State {
-    fn from(value: &VecDeque<BigDecimal>) -> Self {
+impl From<&Stack> for State {
+    fn from(stack: &Stack) -> Self {
         State {
-            stack: value.iter().map(|v| v.to_string()).collect(),
+            stack: stack.snapshot().iter().map(|v| v.to_string()).collect(),
         }
     }
 }
