@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, str::FromStr};
 
-use bigdecimal::{BigDecimal, ParseBigDecimalError, ToPrimitive, Zero};
+use bigdecimal::{BigDecimal, ParseBigDecimalError, Pow, ToPrimitive, Zero};
 use thiserror::Error;
 
 use crate::state::State;
@@ -12,12 +12,10 @@ pub struct Stack {
 
 #[derive(Error, Debug, PartialEq)]
 pub enum StackError {
-    #[error("Operation requires {0} elements")]
+    #[error("operation requires {0} elements")]
     MissingValue(usize),
-    #[error("Even I can't divide by zero")]
-    DivByZero,
-    #[error("Invalid range for operation")]
-    InvalidRange,
+    #[error("{0}")]
+    InvalidArgument(String),
 }
 
 #[derive(Debug, Clone)]
@@ -29,9 +27,11 @@ pub enum Op {
     Divide,
     Modulo,
     Sqrt,
+    Pow,
     Duplicate,
     Pop,
     Precision,
+    Rotate,
 }
 
 impl Stack {
@@ -70,7 +70,9 @@ impl Stack {
             Op::Divide => {
                 let [b, a] = self.check_and_pop(|stack: &[BigDecimal; 2]| {
                     if stack[0] == BigDecimal::zero() {
-                        Err(StackError::DivByZero)
+                        Err(StackError::InvalidArgument(
+                            "element 1 must be non-zero".into(),
+                        ))
                     } else {
                         Ok(())
                     }
@@ -84,12 +86,35 @@ impl Stack {
             Op::Sqrt => {
                 let [a] = self.check_and_pop(|stack: &[BigDecimal; 1]| {
                     if stack[0] < BigDecimal::zero() {
-                        Err(StackError::InvalidRange)
+                        Err(StackError::InvalidArgument(
+                            "element 1 must be positive".into(),
+                        ))
                     } else {
                         Ok(())
                     }
                 })?;
                 self.s.push_front(a.sqrt().unwrap());
+            }
+            Op::Pow => {
+                let [b, a] = self.check_and_pop(|stack: &[BigDecimal; 2]| {
+                    if !(stack[0].is_integer() && stack[0] > BigDecimal::zero()) {
+                        return Err(StackError::InvalidArgument(
+                            "element 1 must be a positive integer".into(),
+                        ));
+                    }
+                    if !stack[1].is_integer() {
+                        return Err(StackError::InvalidArgument(
+                            "element 2 must be an integer".into(),
+                        ));
+                    }
+                    Ok(())
+                })?;
+                let (a, _) = a.as_bigint_and_scale();
+                let (b, _) = b.as_bigint_and_scale();
+                self.s.push_front(BigDecimal::from_bigint(
+                    a.into_owned().pow(b.to_biguint().unwrap()),
+                    0,
+                ));
             }
             Op::Duplicate => {
                 let [a] = self.pop()?;
@@ -101,13 +126,23 @@ impl Stack {
             }
             Op::Precision => {
                 let [a] = self.check_and_pop(|stack: &[BigDecimal; 1]| {
-                    if stack[0] <= BigDecimal::zero() || stack[0] > i64::MAX.into() {
-                        Err(StackError::InvalidRange)
+                    if stack[0] <= BigDecimal::zero()
+                        || stack[0] > i64::MAX.into()
+                        || !stack[0].is_integer()
+                    {
+                        Err(StackError::InvalidArgument(
+                            "element 1 must be a positive integer".into(),
+                        ))
                     } else {
                         Ok(())
                     }
                 })?;
                 self.precision = a.to_u64().unwrap();
+            }
+            Op::Rotate => {
+                let [b, a] = self.pop()?;
+                self.s.push_front(b);
+                self.s.push_front(a);
             }
         }
         Ok(())
@@ -213,7 +248,12 @@ mod tests {
         let mut s = Stack::new();
         s.apply(Op::Push(20.into()))?;
         s.apply(Op::Push(0.into()))?;
-        assert_eq!(s.apply(Op::Divide), Err(StackError::DivByZero));
+        assert_eq!(
+            s.apply(Op::Divide),
+            Err(StackError::InvalidArgument(
+                "element 1 must be non-zero".into()
+            ))
+        );
         Ok(())
     }
 
@@ -240,7 +280,22 @@ mod tests {
     fn sqrt_of_negative() -> Result<(), StackError> {
         let mut s = Stack::new();
         s.apply(Op::Push((-4).into()))?;
-        assert_eq!(s.apply(Op::Sqrt), Err(StackError::InvalidRange));
+        assert_eq!(
+            s.apply(Op::Sqrt),
+            Err(StackError::InvalidArgument(
+                "element 1 must be positive".into()
+            ))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pow() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(2.into()))?;
+        s.apply(Op::Push(8.into()))?;
+        s.apply(Op::Pow)?;
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(256)]);
         Ok(())
     }
 
@@ -259,6 +314,16 @@ mod tests {
         s.apply(Op::Push(1.into()))?;
         s.apply(Op::Pop)?;
         assert!(s.snapshot().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn rotate() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(1.into()))?;
+        s.apply(Op::Push(2.into()))?;
+        s.apply(Op::Rotate)?;
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(1), BigDecimal::from(2)]);
         Ok(())
     }
 }

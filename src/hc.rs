@@ -22,6 +22,7 @@ pub struct App<'a> {
     stack: Stack,
     help: bool,
     ops: HashMap<char, Op>,
+    op: Option<char>,
     op_status: Result<(), StackError>,
 }
 
@@ -32,11 +33,14 @@ Type numbers followed by <Enter> to push them on the stack.
 
 Use the following commands to operate on the stack:
 
-- +, -, *, /, % : perform the operation on the top two values.
+- +, -, *, / : perform the arithmetic operation on the top two values.
+- % : compute the modulo of the second value divided by the first.
+- ^ : raise the second value to the power of the first.
 - P : pop the top value off the stack.
 - d : duplicate the top value.
 - v : compute the square root of the top value.
 - k : pop the top value and use it to set the precision.
+- r : swap the first two values.
 
 The name is inspired by Helix Editor, and the functionality by the venerable GNU dc.
 "#;
@@ -55,11 +59,14 @@ impl App<'_> {
                 ('/', Op::Divide),
                 ('*', Op::Multiply),
                 ('%', Op::Modulo),
+                ('^', Op::Pow),
                 ('v', Op::Sqrt),
                 ('d', Op::Duplicate),
                 ('P', Op::Pop),
                 ('k', Op::Precision),
+                ('r', Op::Rotate),
             ]),
+            op: None,
             op_status: Ok(()),
         })
     }
@@ -87,6 +94,8 @@ impl App<'_> {
         let empty = self.empty_input();
         match crossterm::event::read()? {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.op = None;
+                self.op_status = Ok(());
                 // Keep TextArea as a single-line entry.
                 if key_event.code == KeyCode::Char('m')
                     && key_event.modifiers == KeyModifiers::CONTROL
@@ -109,6 +118,7 @@ impl App<'_> {
                         }
                     }
                     KeyCode::Char(c) if empty && self.ops.contains_key(&c) => {
+                        self.op = Some(c);
                         self.op_status = self.stack.apply(self.ops[&c].clone());
                     }
                     _ => {
@@ -138,9 +148,9 @@ impl App<'_> {
         Line::from(vec![
             " Helix Calc - ".into(),
             " Help ".into(),
-            "<?> ".blue().bold(),
+            "< ? > ".blue().bold(),
             " Quit ".into(),
-            "<Q> ".blue().bold(),
+            "< Q > ".blue().bold(),
         ])
         .centered()
         .bg(Color::Black)
@@ -182,16 +192,27 @@ impl App<'_> {
 
     fn status(&self) -> impl Widget {
         let status = match &self.op_status {
-            Ok(_) => {
-                if self.empty_input() {
-                    "".into()
-                } else if self.value().is_some() {
-                    "<Enter> to add to the stack".into()
+            Ok(_) => Line::from(if self.empty_input() {
+                if let Some(c) = self.op {
+                    format!("< {} >", c).blue().bold()
                 } else {
-                    "Input is not a valid number".into()
+                    "".into()
+                }
+            } else if self.value().is_some() {
+                "<Enter> to add to the stack".into()
+            } else {
+                "Input is not a valid number".into()
+            }),
+            Err(err) => {
+                if let Some(c) = self.op {
+                    Line::from(vec![
+                        format!("< {} >", c).blue().bold(),
+                        format!(": {}", err).into(),
+                    ])
+                } else {
+                    Line::from(err.to_string())
                 }
             }
-            Err(err) => err.to_string(),
         };
         Text::from(status).bg(Color::Black)
     }
