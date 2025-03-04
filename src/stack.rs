@@ -154,7 +154,8 @@ impl Stack {
         self.s
             .iter()
             .map(|v| {
-                if v.digits() > self.precision {
+                let (_, scale) = v.as_bigint_and_scale();
+                if scale as u64 > self.precision {
                     v.with_scale(self.precision as i64)
                 } else {
                     v.clone()
@@ -324,6 +325,19 @@ mod tests {
         s.apply(Op::Push(2.into()))?;
         s.apply(Op::Rotate)?;
         assert_eq!(s.snapshot(), vec![BigDecimal::from(1), BigDecimal::from(2)]);
+        Ok(())
+    }
+
+    #[test]
+    fn precision() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(1234.into()))?;
+        s.apply(Op::Push(2.into()))?;
+        s.apply(Op::Precision)?;
+        assert_eq!(s.snapshot()[0].to_string(), "1234");
+        s.apply(Op::Push(3.into()))?;
+        s.apply(Op::Divide)?;
+        assert_eq!(s.snapshot()[0].to_string(), "411.33");
         Ok(())
     }
 }
