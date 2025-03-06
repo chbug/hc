@@ -106,7 +106,7 @@ impl App<'_> {
                     KeyCode::Char('q') => {
                         self.exit = true;
                     }
-                    KeyCode::Enter => {
+                    KeyCode::Enter | KeyCode::Char(' ') => {
                         self.consume();
                     }
                     KeyCode::Char('?') => {
@@ -146,7 +146,7 @@ impl App<'_> {
 
     fn instructions(&self) -> impl Widget {
         Line::from(vec![
-            " Helix Calc - ".into(),
+            format!(" Helix Calc {} - ", env!("CARGO_PKG_VERSION")).into(),
             " Help ".into(),
             "< ? > ".blue().bold(),
             " Quit ".into(),
@@ -192,17 +192,24 @@ impl App<'_> {
 
     fn status(&self) -> impl Widget {
         let status = match &self.op_status {
-            Ok(_) => Line::from(if self.empty_input() {
-                if let Some(c) = self.op {
-                    format!("< {} >", c).blue().bold()
+            Ok(_) => {
+                if self.empty_input() {
+                    if let Some(c) = self.op {
+                        Line::from(format!("< {} >", c).blue().bold())
+                    } else {
+                        Line::from("")
+                    }
+                } else if self.value().is_some() {
+                    Line::from(vec![
+                        "< Enter >".bold().blue(),
+                        " or ".into(),
+                        "< Space >".bold().blue(),
+                        " to add to the stack".into(),
+                    ])
                 } else {
-                    "".into()
+                    Line::from("Input is not a valid number")
                 }
-            } else if self.value().is_some() {
-                "<Enter> to add to the stack".into()
-            } else {
-                "Input is not a valid number".into()
-            }),
+            }
             Err(err) => {
                 if let Some(c) = self.op {
                     Line::from(vec![

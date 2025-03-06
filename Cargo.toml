@@ -1,6 +1,6 @@
 [package]
 name = "helix-calc"
-version = "1.0.3"
+version = "1.0.4"
 authors = ["Fred Gobry <fred@epthos.net>"]
 edition = "2021"
 description = "Reverse Polish Notation calculator in a terminal app."
@@ -9,6 +9,10 @@ readme = "README.md"
 license = "GPL-3.0-only"
 keywords = ["tui", "calculator", "rpn"]
 categories = ["command-line-utilities"]
+
+[[bin]]
+name = "hc"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
