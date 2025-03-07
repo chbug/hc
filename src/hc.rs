@@ -86,6 +86,13 @@ impl App<'_> {
         (&self.stack).into()
     }
 
+    pub fn add_extra(&mut self, extras: Vec<BigDecimal>) -> anyhow::Result<()> {
+        for extra in extras {
+            self.stack.apply(Op::Push(extra))?;
+        }
+        Ok(())
+    }
+
     fn empty_input(&self) -> bool {
         self.textarea.lines()[0].is_empty()
     }
