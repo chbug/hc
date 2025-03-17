@@ -1,5 +1,4 @@
 use anyhow::Context;
-use bigdecimal::BigDecimal;
 use clap::Parser;
 
 mod hc;
@@ -9,8 +8,8 @@ mod state;
 #[derive(Parser)]
 #[command(version, about, long_about=None)]
 struct Cli {
-    #[arg(help = "Numbers to push to the stack at startup")]
-    extra: Vec<BigDecimal>,
+    #[arg(help = "Operations to perform at startup")]
+    extra: Vec<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -19,7 +18,7 @@ fn main() -> anyhow::Result<()> {
     let state = state::load().unwrap_or_default();
     let mut term = ratatui::init();
     let mut app = hc::App::new(state)?;
-    app.add_extra(cli.extra)?;
+    app.add_extra(cli.extra.join(" "))?;
     let result = app.run(&mut term);
     // Try to always restore the screen to avoid weird display.
     ratatui::restore();

@@ -1,5 +1,5 @@
 use bigdecimal::BigDecimal;
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Stylize},
@@ -8,6 +8,7 @@ use ratatui::{
     Frame,
 };
 use std::{collections::HashMap, str::FromStr};
+use thiserror::Error;
 use tui_textarea::TextArea;
 
 use crate::{
@@ -23,7 +24,7 @@ pub struct App<'a> {
     help: bool,
     ops: HashMap<char, Op>,
     op: Option<char>,
-    op_status: Result<(), StackError>,
+    op_status: Result<(), AppError>,
 }
 
 const HELP_MSG: &str = r#"
@@ -44,6 +45,14 @@ Use the following commands to operate on the stack:
 
 The name is inspired by Helix Editor, and the functionality by the venerable GNU dc.
 "#;
+
+#[derive(Error, Debug, PartialEq)]
+enum AppError {
+    #[error("input is invalid")]
+    InputError,
+    #[error("{0}")]
+    StackError(StackError),
+}
 
 impl App<'_> {
     pub fn new(state: State) -> anyhow::Result<Self> {
@@ -86,50 +95,60 @@ impl App<'_> {
         (&self.stack).into()
     }
 
-    pub fn add_extra(&mut self, extras: Vec<BigDecimal>) -> anyhow::Result<()> {
-        for extra in extras {
-            self.stack.apply(Op::Push(extra))?;
+    pub fn add_extra(&mut self, extra: String) -> anyhow::Result<()> {
+        for c in extra.chars() {
+            self.handle_key(KeyCode::Char(c))?;
         }
         Ok(())
     }
 
-    fn empty_input(&self) -> bool {
-        self.textarea.lines()[0].is_empty()
+    fn handle_key(&mut self, k: KeyCode) -> Result<(), AppError> {
+        let empty = self.input_is_empty();
+        match k {
+            KeyCode::Char('q') => {
+                self.exit = true;
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                self.input_consume()?;
+            }
+            KeyCode::Char('-') if !empty => {
+                let v = self.input_value()?;
+                self.textarea = TextArea::from([format!("{}", -v)]);
+            }
+            KeyCode::Char(c) if empty && self.ops.contains_key(&c) => {
+                self.op = Some(c);
+                self.stack
+                    .apply(self.ops[&c].clone())
+                    .map_err(|e| AppError::StackError(e))?;
+            }
+            _ => {
+                let event = KeyEvent::new(k, KeyModifiers::empty());
+                self.textarea.input(event);
+            }
+        }
+        Ok(())
     }
 
     fn handle_events(&mut self) -> std::io::Result<()> {
-        let empty = self.empty_input();
         match crossterm::event::read()? {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 self.op = None;
                 self.op_status = Ok(());
-                // Keep TextArea as a single-line entry.
-                if key_event.code == KeyCode::Char('m')
-                    && key_event.modifiers == KeyModifiers::CONTROL
-                {
-                    return Ok(());
-                }
-                match key_event.code {
-                    KeyCode::Char('q') => {
-                        self.exit = true;
+                // Perform a few translations between what's allowed interactively and
+                // what's only done from the command-line.
+                let keycode = match key_event.code {
+                    KeyCode::Char('m') if key_event.modifiers == KeyModifiers::CONTROL => {
+                        KeyCode::Enter
                     }
-                    KeyCode::Enter | KeyCode::Char(' ') => {
-                        self.consume();
-                    }
+                    KeyCode::Esc => KeyCode::Char('q'),
+                    c => c,
+                };
+                match keycode {
                     KeyCode::Char('?') => {
                         self.help = !self.help;
                     }
-                    KeyCode::Char('-') if !empty => {
-                        if let Some(v) = self.value() {
-                            self.textarea = TextArea::from([format!("{}", -v)]);
-                        }
-                    }
-                    KeyCode::Char(c) if empty && self.ops.contains_key(&c) => {
-                        self.op = Some(c);
-                        self.op_status = self.stack.apply(self.ops[&c].clone());
-                    }
-                    _ => {
-                        self.textarea.input(key_event);
+                    c => {
+                        self.op_status = self.handle_key(c);
                     }
                 }
             }
@@ -140,15 +159,24 @@ impl App<'_> {
         Ok(())
     }
 
-    fn value(&self) -> Option<BigDecimal> {
-        BigDecimal::from_str(&self.textarea.lines()[0]).ok()
+    fn input_is_empty(&self) -> bool {
+        self.textarea.lines()[0].is_empty()
     }
 
-    fn consume(&mut self) {
-        if let Some(v) = self.value() {
-            self.op_status = self.stack.apply(Op::Push(v));
-            self.textarea = TextArea::default();
+    fn input_value(&self) -> Result<BigDecimal, AppError> {
+        BigDecimal::from_str(&self.textarea.lines()[0]).map_err(|_| AppError::InputError)
+    }
+
+    fn input_consume(&mut self) -> Result<(), AppError> {
+        if self.input_is_empty() {
+            return Ok(());
         }
+        let v = self.input_value()?;
+        self.stack
+            .apply(Op::Push(v))
+            .map_err(|e| AppError::StackError(e))?;
+        self.textarea = TextArea::default();
+        Ok(())
     }
 
     fn instructions(&self) -> impl Widget {
@@ -200,13 +228,13 @@ impl App<'_> {
     fn status(&self) -> impl Widget {
         let status = match &self.op_status {
             Ok(_) => {
-                if self.empty_input() {
+                if self.input_is_empty() {
                     if let Some(c) = self.op {
                         Line::from(format!("< {} >", c).blue().bold())
                     } else {
                         Line::from("")
                     }
-                } else if self.value().is_some() {
+                } else if self.input_value().is_ok() {
                     Line::from(vec![
                         "< Enter >".bold().blue(),
                         " or ".into(),
