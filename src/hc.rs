@@ -30,25 +30,16 @@ pub struct App<'a> {
 const HELP_MSG: &str = r#"
 Helix Calc is a simple Reverse Polish Notation calculator.
 
-Type numbers followed by <Enter> to push them on the stack.
+List of all available operations:
 
-Use the following commands to operate on the stack:
-
-- +, -, *, / : perform the arithmetic operation on the top two values.
-- % : compute the modulo of the second value divided by the first.
-- ^ : raise the second value to the power of the first.
-- P : pop the top value off the stack.
-- d : duplicate the top value.
-- v : compute the square root of the top value.
-- k : pop the top value and use it to set the precision.
-- r : swap the first two values.
+   https://github.com/epthos/epthos
 
 The name is inspired by Helix Editor, and the functionality by the venerable GNU dc.
 "#;
 
 #[derive(Error, Debug, PartialEq)]
 enum AppError {
-    #[error("input is invalid")]
+    #[error("Input is invalid")]
     InputError,
     #[error("{0}")]
     StackError(StackError),
@@ -189,9 +180,9 @@ impl App<'_> {
         Line::from(vec![
             format!(" Helix Calc {} - ", env!("CARGO_PKG_VERSION")).into(),
             " Help ".into(),
-            "< ? > ".blue().bold(),
+            "<?> ".blue().bold(),
             " Quit ".into(),
-            "< Q > ".blue().bold(),
+            "<Q> ".blue().bold(),
         ])
         .centered()
         .bg(Color::Black)
@@ -236,17 +227,12 @@ impl App<'_> {
             Ok(_) => {
                 if self.input_is_empty() {
                     if let Some(c) = self.op {
-                        Line::from(format!("< {} >", c).blue().bold())
+                        Line::from(format!("<{}>", c).blue().bold())
                     } else {
                         Line::from("")
                     }
                 } else if self.input_value().is_ok() {
-                    Line::from(vec![
-                        "< Enter >".bold().blue(),
-                        " or ".into(),
-                        "< Space >".bold().blue(),
-                        " to add to the stack".into(),
-                    ])
+                    Line::from(vec!["<Enter>".bold().blue(), " to add to the stack".into()])
                 } else {
                     Line::from("Input is not a valid number")
                 }
@@ -254,7 +240,7 @@ impl App<'_> {
             Err(err) => {
                 if let Some(c) = self.op {
                     Line::from(vec![
-                        format!("< {} >", c).blue().bold(),
+                        format!("<{}>", c).blue().bold(),
                         format!(": {}", err).into(),
                     ])
                 } else {
