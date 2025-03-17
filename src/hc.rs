@@ -115,7 +115,10 @@ impl App<'_> {
                 let v = self.input_value()?;
                 self.textarea = TextArea::from([format!("{}", -v)]);
             }
-            KeyCode::Char(c) if empty && self.ops.contains_key(&c) => {
+            KeyCode::Char(c) if self.ops.contains_key(&c) => {
+                if !empty {
+                    self.input_consume()?;
+                }
                 self.op = Some(c);
                 self.stack
                     .apply(self.ops[&c].clone())
@@ -154,8 +157,7 @@ impl App<'_> {
             }
             _ => {}
         };
-        let txt = &self.textarea.lines()[0];
-        self.valid = txt.is_empty() || BigDecimal::from_str(txt).is_ok();
+        self.valid = self.input_is_empty() || self.input_value().is_ok();
         Ok(())
     }
 
@@ -164,7 +166,11 @@ impl App<'_> {
     }
 
     fn input_value(&self) -> Result<BigDecimal, AppError> {
-        BigDecimal::from_str(&self.textarea.lines()[0]).map_err(|_| AppError::InputError)
+        let mut s = self.textarea.lines()[0].clone();
+        if s.starts_with("_") {
+            s = format!("-{}", &s[1..]);
+        }
+        BigDecimal::from_str(&s).map_err(|_| AppError::InputError)
     }
 
     fn input_consume(&mut self) -> Result<(), AppError> {
