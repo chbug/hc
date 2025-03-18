@@ -1,6 +1,6 @@
 [package]
 name = "helix-calc"
-version = "1.1.0"
+version = "1.1.1"
 authors = ["Fred Gobry <fred@epthos.net>"]
 edition = "2021"
 description = "Reverse Polish Notation calculator in a terminal app."
