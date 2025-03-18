@@ -25,6 +25,11 @@ fn main() -> anyhow::Result<()> {
     // Don't attempt to save the state if something went wrong,
     // to avoid corrupting it.
     result.context("UI failure")?;
-    state::save(&app.state())?;
+    let state = app.state();
+    state::save(&state)?;
+    // Provide the top of the stack in the output for convenience.
+    if !state.stack.is_empty() {
+        println!("{}", state.stack[0]);
+    }
     Ok(())
 }
