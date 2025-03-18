@@ -15,12 +15,16 @@ struct Cli {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    // Initial loading and pre-UI calculations.
+    // We haven't taken over the screen yet, so it's fine to
+    // just return an error.
     let state = state::load().unwrap_or_default();
-    let mut term = ratatui::init();
     let mut app = hc::App::new(state)?;
     app.add_extra(cli.extra.join(" "))?;
+
+    // From here on, we need to restore prior to failing.
+    let mut term = ratatui::init();
     let result = app.run(&mut term);
-    // Try to always restore the screen to avoid weird display.
     ratatui::restore();
     // Don't attempt to save the state if something went wrong,
     // to avoid corrupting it.
