@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, str::FromStr};
 
-use bigdecimal::{BigDecimal, ParseBigDecimalError, Pow, ToPrimitive, Zero};
+use bigdecimal::{num_bigint::BigInt, BigDecimal, ParseBigDecimalError, Pow, ToPrimitive, Zero};
 use thiserror::Error;
 
 use crate::state::State;
@@ -33,6 +33,10 @@ pub enum Op {
     Precision,
     Rotate,
 }
+
+// Arbitrarily cap exponentiation to that number of bits to avoid
+// slow computations (that are likely to be accidental anyways).
+const MAX_BIT_COUNT: u64 = 1024;
 
 impl Stack {
     #[cfg(test)]
@@ -107,14 +111,25 @@ impl Stack {
                             "element 2 must be an integer".into(),
                         ));
                     }
+                    let a = stack[1].as_bigint_and_scale().0.into_owned();
+                    let b = stack[0].as_bigint_and_scale().0.into_owned();
+                    // Arbitrarily cap the number of digits of the result to avoid
+                    // accidental freeze / memory blowup when pressing ^ too many times.
+                    if BigInt::from(a.bits()) * &b > BigInt::from(MAX_BIT_COUNT) {
+                        return Err(StackError::InvalidArgument(
+                            "chickening out of creating such a large result".into(),
+                        ));
+                    }
                     Ok(())
                 })?;
-                let (a, _) = a.as_bigint_and_scale();
-                let (b, _) = b.as_bigint_and_scale();
-                self.s.push_front(BigDecimal::from_bigint(
-                    a.into_owned().pow(b.to_biguint().unwrap()),
-                    0,
-                ));
+                let a = a.as_bigint_and_scale().0.into_owned();
+                let b = b.as_bigint_and_scale().0.into_owned();
+                let result = a.pow(b.to_biguint().unwrap());
+                // Normalization ensures the exponent representation is simplified.
+                // For instance 10^100 -> (1, -100) after normalization instead of
+                // (1e100, 0).
+                self.s
+                    .push_front(BigDecimal::from_bigint(result, 0).normalized());
             }
             Op::Duplicate => {
                 let [a] = self.pop()?;
@@ -338,6 +353,21 @@ mod tests {
         s.apply(Op::Push(3.into()))?;
         s.apply(Op::Divide)?;
         assert_eq!(s.snapshot()[0].to_string(), "411.33");
+        Ok(())
+    }
+
+    #[test]
+    fn pow_cap() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(2.into()))?;
+        s.apply(Op::Push(2000.into()))?;
+        assert_eq!(
+            s.apply(Op::Pow),
+            Err(StackError::InvalidArgument(
+                "chickening out of creating such a large result".into()
+            ))
+        );
+
         Ok(())
     }
 }

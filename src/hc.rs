@@ -1,4 +1,4 @@
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, Zero};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Cell, Clear, Paragraph, Row, Table, Widget, Wrap},
     Frame,
 };
-use std::{collections::HashMap, str::FromStr};
+use std::{cmp::min, collections::HashMap, str::FromStr};
 use thiserror::Error;
 use tui_textarea::TextArea;
 
@@ -188,7 +188,7 @@ impl App<'_> {
         .bg(Color::Black)
     }
 
-    fn stack(&self, area: &Rect) -> impl Widget {
+    fn render_stack(&self, area: &Rect) -> impl Widget {
         let snapshot = self.stack.snapshot();
         let stack: Vec<Row<'_>> = (1..=area.height)
             .rev()
@@ -196,7 +196,7 @@ impl App<'_> {
                 let stack_index = (index as usize) - 1;
                 let [val, idx] = if stack_index < snapshot.len() {
                     [
-                        Span::from(format!("{}", snapshot[stack_index])),
+                        Span::from(format_number(&snapshot[stack_index], area.width)),
                         Span::from(format!("{}", index)).style(Color::White),
                     ]
                 } else {
@@ -277,12 +277,103 @@ impl App<'_> {
         .areas(page);
 
         frame.render_widget(self.instructions(), instructions_area);
-        frame.render_widget(self.stack(&stack_area), stack_area);
+        frame.render_widget(self.render_stack(&stack_area), stack_area);
         self.render_input(frame, input_area);
         frame.render_widget(self.status(), status_area);
 
         if self.help {
             self.render_help(frame);
         }
+    }
+}
+
+fn format_number(n: &BigDecimal, width: u16) -> String {
+    let repr = n.to_string();
+    if repr.len() <= width as usize {
+        return repr;
+    }
+    // We want to spend our "width budget" on a mix of areas
+    // of the string, as we don't know what the user cares about.
+    // An alternative would be scientific notation, but I'd rather
+    // we introduce "display modes" for those.
+    //
+    // [SGN][MSB]/.<POW>./[LSB].[RES]
+    let neg = if n < &BigDecimal::zero() { 1 } else { 0 };
+    let dot = repr.find('.');
+    let mut budget = width;
+    budget -= neg as u16; // We need to insert the sign in the end.
+    let mut parts = 2;
+    let pow = if let Some(idx) = dot {
+        parts += 1;
+        budget -= 1; // we need to insert the dot in the end.
+        repr[neg..idx].len()
+    } else {
+        repr[neg..].len()
+    };
+    let pow = format!("[~{}~]", pow);
+    budget -= pow.len() as u16; // we need to insert the magnitude back.
+    if budget < parts {
+        // Don't have enough space to represent this :(
+        return "?".into();
+    }
+    // We can now split the budget in "parts" and allocate the remainder to
+    // [MSB] as it carries most of the information.
+    let msb = (budget / parts + (budget % parts)) as usize;
+    let lsb = (budget / parts) as usize;
+    let mut result = vec![];
+    result.push(&repr[..msb + neg]);
+    result.push(&pow);
+    if let Some(idx) = dot {
+        result.push(&repr[idx - lsb..min(idx + lsb + 1, repr.len())]);
+    } else {
+        result.push(&repr[repr.len() - lsb..]);
+    }
+
+    result.join("")
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn format_regular_number() {
+        let n: BigDecimal = "12345".parse().unwrap();
+        assert_eq!(format_number(&n, 10), "12345");
+    }
+
+    #[test]
+    fn format_long_number() {
+        let n: BigDecimal = "123456789098".parse().unwrap();
+        assert_eq!(format_number(&n, 10), "12[~12~]98");
+        assert_eq!(format_number(&n, 11), "123[~12~]98");
+    }
+
+    #[test]
+    fn format_long_negative_number() {
+        let n: BigDecimal = "-123456789098".parse().unwrap();
+        assert_eq!(format_number(&n, 10), "-12[~12~]8");
+        assert_eq!(format_number(&n, 9), "-1[~12~]8");
+        // We need at least 9 characters for this...
+        assert_eq!(format_number(&n, 8), "?");
+    }
+
+    #[test]
+    fn format_long_decimal_number() {
+        let n: BigDecimal = "1234567.89098".parse().unwrap();
+        assert_eq!(format_number(&n, 10), "12[~7~]7.8");
+        assert_eq!(format_number(&n, 9), "1[~7~]7.8");
+    }
+
+    #[test]
+    fn format_dont_overflow_decimal() {
+        let n: BigDecimal = "12345678909876543.21".parse().unwrap();
+        assert_eq!(format_number(&n, 18), "12345[~17~]543.21");
+    }
+
+    #[test]
+    fn format_long_negative_decimal_number() {
+        let n: BigDecimal = "-1234567.89098".parse().unwrap();
+        assert_eq!(format_number(&n, 10), "-1[~7~]7.8");
     }
 }
