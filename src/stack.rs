@@ -7,6 +7,7 @@ use crate::state::State;
 
 pub struct Stack {
     s: VecDeque<BigDecimal>,
+    // Precision when taking a snapshot (not of internal representation).
     precision: u64,
 }
 
@@ -60,20 +61,20 @@ impl Stack {
                 self.s.push_front(v);
             }
             Op::Add => {
-                let [b, a] = self.pop()?;
+                let [a, b] = self.pop()?;
                 self.s.push_front(a + b);
             }
             Op::Subtract => {
-                let [b, a] = self.pop()?;
+                let [a, b] = self.pop()?;
                 self.s.push_front(a - b);
             }
             Op::Multiply => {
-                let [b, a] = self.pop()?;
+                let [a, b] = self.pop()?;
                 self.s.push_front(a * b);
             }
             Op::Divide => {
-                let [b, a] = self.check_and_pop(|stack: &[BigDecimal; 2]| {
-                    if stack[0] == BigDecimal::zero() {
+                let [a, b] = self.check_and_pop(|stack: &[BigDecimal; 2]| {
+                    if stack[1] == BigDecimal::zero() {
                         Err(StackError::InvalidArgument(
                             "element 1 must be non-zero".into(),
                         ))
@@ -84,7 +85,7 @@ impl Stack {
                 self.s.push_front(a / b);
             }
             Op::Modulo => {
-                let [b, a] = self.pop()?;
+                let [a, b] = self.pop()?;
                 self.s.push_front(a % b);
             }
             Op::Sqrt => {
@@ -100,19 +101,26 @@ impl Stack {
                 self.s.push_front(a.sqrt().unwrap());
             }
             Op::Pow => {
-                let [b, a] = self.check_and_pop(|stack: &[BigDecimal; 2]| {
-                    if !(stack[0].is_integer() && stack[0] > BigDecimal::zero()) {
+                // This is the only operation that needs to crack open the representation.
+                // Careful, BigDecimal's scale works not only as the number of digits after
+                // the dot, it's really a generalized
+                //     int_value . 10^-scale
+                let [a, b] = self.prep_and_pop(|stack: &[BigDecimal; 2]| {
+                    let [a, b] = stack;
+                    if !(b.is_integer() && b > &BigDecimal::zero() && b < &u64::MAX.into()) {
                         return Err(StackError::InvalidArgument(
                             "element 1 must be a positive integer".into(),
                         ));
                     }
-                    if !stack[1].is_integer() {
+                    if !a.is_integer() {
                         return Err(StackError::InvalidArgument(
                             "element 2 must be an integer".into(),
                         ));
                     }
-                    let a = stack[1].as_bigint_and_scale().0.into_owned();
-                    let b = stack[0].as_bigint_and_scale().0.into_owned();
+                    // We know the numbers are integers, but we still need to flush all
+                    // the digits into the bigint where we can express the Pow operation.
+                    let a = a.with_scale(0).as_bigint_and_scale().0.into_owned();
+                    let b = b.with_scale(0).as_bigint_and_scale().0.into_owned();
                     // Arbitrarily cap the number of digits of the result to avoid
                     // accidental freeze / memory blowup when pressing ^ too many times.
                     if BigInt::from(a.bits()) * &b > BigInt::from(MAX_BIT_COUNT) {
@@ -120,16 +128,13 @@ impl Stack {
                             "chickening out of creating such a large result".into(),
                         ));
                     }
-                    Ok(())
+                    Ok([a, b])
                 })?;
-                let a = a.as_bigint_and_scale().0.into_owned();
-                let b = b.as_bigint_and_scale().0.into_owned();
                 let result = a.pow(b.to_biguint().unwrap());
                 // Normalization ensures the exponent representation is simplified.
                 // For instance 10^100 -> (1, -100) after normalization instead of
                 // (1e100, 0).
-                self.s
-                    .push_front(BigDecimal::from_bigint(result, 0).normalized());
+                self.s.push_front(BigDecimal::from_bigint(result, 0));
             }
             Op::Duplicate => {
                 let [a] = self.pop()?;
@@ -155,7 +160,7 @@ impl Stack {
                 self.precision = a.to_u64().unwrap();
             }
             Op::Rotate => {
-                let [b, a] = self.pop()?;
+                let [a, b] = self.pop()?;
                 self.s.push_front(b);
                 self.s.push_front(a);
             }
@@ -179,25 +184,43 @@ impl Stack {
             .collect()
     }
 
+    // Validate a segment of the stack through a user-provided function and return it.
+    // Note: the elements are returned in the reverse order of the stack, which is the
+    // natural order for running operations.
     fn check_and_pop<const C: usize, F: Fn(&[BigDecimal; C]) -> Result<(), StackError>>(
         &mut self,
         validator: F,
     ) -> Result<[BigDecimal; C], StackError> {
+        self.prep_and_pop(move |input| {
+            validator(input)?;
+            Ok(input.clone())
+        })
+    }
+
+    // Transform a segment of the stack through a user-provided function and return it.
+    // Note: the elements are returned in the reverse order of the stack, which is the
+    // natural order for running operations.
+    fn prep_and_pop<const C: usize, T, F: Fn(&[BigDecimal; C]) -> Result<[T; C], StackError>>(
+        &mut self,
+        validator: F,
+    ) -> Result<[T; C], StackError> {
         if self.s.len() < C {
             return Err(StackError::MissingValue(C));
         }
         let result = self
             .s
             .range(0..C)
+            .rev()
             .cloned()
             .collect::<Vec<BigDecimal>>()
             .try_into()
             .unwrap();
-        validator(&result)?;
+        let result = validator(&result)?;
         self.s.drain(0..C);
         Ok(result)
     }
 
+    // Return a segment of the stack in reverse order.
     fn pop<const C: usize>(&mut self) -> Result<[BigDecimal; C], StackError> {
         self.check_and_pop(|_| Ok(()))
     }
@@ -217,6 +240,8 @@ impl TryFrom<State> for Stack {
 
 #[cfg(test)]
 mod tests {
+    use bigdecimal::num_bigint::{self};
+
     use super::*;
 
     #[test]
@@ -368,6 +393,20 @@ mod tests {
             ))
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn pow_representation() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(10.into()))?;
+        s.apply(Op::Push(2.into()))?;
+        s.apply(Op::Pow)?;
+        let r = s.snapshot()[0].clone();
+        let (bi, s) = r.as_bigint_and_scale();
+
+        assert_eq!(*bi, BigInt::new(num_bigint::Sign::Plus, vec![100]));
+        assert_eq!(s, 0);
         Ok(())
     }
 }
