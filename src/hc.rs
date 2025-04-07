@@ -1,11 +1,11 @@
 use bigdecimal::{BigDecimal, Zero};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
+    buffer::Buffer,
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Cell, Clear, Paragraph, Row, Table, Widget, Wrap},
-    Frame,
 };
 use std::{cmp::min, collections::HashMap, str::FromStr};
 use thiserror::Error;
@@ -72,10 +72,10 @@ impl App<'_> {
     }
 
     pub fn run(&mut self, term: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
-        self.valid = true;
+        self.update_valid();
         while !self.exit {
             term.draw(|frame| {
-                self.render(frame);
+                frame.render_widget(&*self, frame.area());
             })?;
             self.handle_events()?;
         }
@@ -148,8 +148,17 @@ impl App<'_> {
             }
             _ => {}
         };
-        self.valid = self.input_is_empty() || self.input_value().is_ok();
+        self.update_valid();
         Ok(())
+    }
+
+    fn update_valid(&mut self) {
+        self.valid = self.input_is_empty() || self.input_value().is_ok();
+        self.textarea.set_block(
+            Block::bordered()
+                .border_style(if self.valid { Color::White } else { Color::Red })
+                .bg(Color::Black),
+        );
     }
 
     fn input_is_empty(&self) -> bool {
@@ -176,7 +185,7 @@ impl App<'_> {
         Ok(())
     }
 
-    fn instructions(&self) -> impl Widget {
+    fn render_instructions(&self) -> impl Widget {
         Line::from(vec![
             format!(" Helix Calc {} - ", env!("CARGO_PKG_VERSION")).into(),
             " Help ".into(),
@@ -213,16 +222,7 @@ impl App<'_> {
             .bg(Color::Black)
     }
 
-    fn render_input(&mut self, frame: &mut Frame, area: Rect) {
-        self.textarea.set_block(
-            Block::bordered()
-                .border_style(if self.valid { Color::White } else { Color::Red })
-                .bg(Color::Black),
-        );
-        frame.render_widget(&self.textarea, area);
-    }
-
-    fn status(&self) -> impl Widget {
+    fn render_status(&self) -> impl Widget {
         let status = match &self.op_status {
             Ok(_) => {
                 if self.input_is_empty() {
@@ -250,24 +250,13 @@ impl App<'_> {
         };
         Text::from(status).bg(Color::Black)
     }
+}
 
-    fn render_help(&self, frame: &mut Frame) {
-        let vertical = Layout::vertical([Constraint::Percentage(50)]).flex(Flex::Center);
-        let horizontal = Layout::horizontal([Constraint::Percentage(50)]).flex(Flex::Center);
-        let [area] = vertical.areas(frame.area());
-        let [area] = horizontal.areas(area);
-        frame.render_widget(Clear, area);
-
-        let help_txt = Paragraph::new(Text::from(HELP_MSG))
-            .block(Block::bordered().title(" Help").bg(Color::Black))
-            .wrap(Wrap { trim: false });
-        frame.render_widget(help_txt, area);
-    }
-
-    fn render(&mut self, frame: &mut Frame) {
+impl Widget for &App<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
         let [page] = Layout::horizontal([Constraint::Length(50)])
             .flex(Flex::Center)
-            .areas(frame.area());
+            .areas(area);
         let [instructions_area, stack_area, input_area, status_area] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Percentage(100),
@@ -276,14 +265,32 @@ impl App<'_> {
         ])
         .areas(page);
 
-        frame.render_widget(self.instructions(), instructions_area);
-        frame.render_widget(self.render_stack(&stack_area), stack_area);
-        self.render_input(frame, input_area);
-        frame.render_widget(self.status(), status_area);
+        self.render_instructions().render(instructions_area, buf);
+        self.render_stack(&stack_area).render(stack_area, buf);
+        self.textarea.render(input_area, buf);
+        self.render_status().render(status_area, buf);
 
         if self.help {
-            self.render_help(frame);
+            Help::default().render(area, buf);
         }
+    }
+}
+
+#[derive(Default)]
+struct Help {}
+
+impl Widget for Help {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let vertical = Layout::vertical([Constraint::Percentage(50)]).flex(Flex::Center);
+        let horizontal = Layout::horizontal([Constraint::Percentage(50)]).flex(Flex::Center);
+        let [area] = vertical.areas(area);
+        let [area] = horizontal.areas(area);
+        Clear::default().render(area, buf);
+
+        Paragraph::new(Text::from(HELP_MSG))
+            .block(Block::bordered().title(" Help").bg(Color::Black))
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
     }
 }
 
