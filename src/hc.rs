@@ -198,6 +198,7 @@ impl App<'_> {
     }
 
     fn render_stack(&self, area: &Rect) -> impl Widget {
+        let margin = 5; // Size of the margin holding the stack index.
         let snapshot = self.stack.snapshot();
         let stack: Vec<Row<'_>> = (1..=area.height)
             .rev()
@@ -205,7 +206,10 @@ impl App<'_> {
                 let stack_index = (index as usize) - 1;
                 let [val, idx] = if stack_index < snapshot.len() {
                     [
-                        Span::from(format_number(&snapshot[stack_index], area.width)),
+                        Span::from(format_number(
+                            &snapshot[stack_index],
+                            area.width - (margin + 1),
+                        )),
                         Span::from(format!("{}", index)).style(Color::White),
                     ]
                 } else {
@@ -217,9 +221,12 @@ impl App<'_> {
                 ])
             })
             .collect();
-        Table::new(stack, [Constraint::Percentage(100), Constraint::Length(5)])
-            .column_spacing(1)
-            .bg(Color::Black)
+        Table::new(
+            stack,
+            [Constraint::Percentage(100), Constraint::Length(margin)],
+        )
+        .column_spacing(1)
+        .bg(Color::Black)
     }
 
     fn render_status(&self) -> impl Widget {
@@ -382,5 +389,22 @@ mod test {
     fn format_long_negative_decimal_number() {
         let n: BigDecimal = "-1234567.89098".parse().unwrap();
         assert_eq!(format_number(&n, 10), "-1[~7~]7.8");
+    }
+
+    #[test]
+    fn validate_display_of_long_numbers() -> anyhow::Result<()> {
+        let mut app = App::new(State::default())?;
+        app.add_extra("10000000 100000000 *".into())?;
+
+        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 6));
+        app.render(buf.area, &mut buf);
+
+        let mut line = String::with_capacity(buf.area.width as usize);
+        for x in 0..buf.area.width {
+            let c = buf[(x, 1)].symbol();
+            line.push_str(c);
+        }
+        assert_eq!(line, "1000[~16~]0000     1");
+        Ok(())
     }
 }
