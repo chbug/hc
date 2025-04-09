@@ -206,18 +206,15 @@ impl App<'_> {
                 let stack_index = (index as usize) - 1;
                 let [val, idx] = if stack_index < snapshot.len() {
                     [
-                        Span::from(format_number(
-                            &snapshot[stack_index],
-                            area.width - (margin + 1),
-                        )),
-                        Span::from(format!("{}", index)).style(Color::White),
+                        format_number(&snapshot[stack_index], area.width - (margin + 1)),
+                        Line::raw(format!("{}", index)).style(Color::White),
                     ]
                 } else {
-                    [Span::from(""), Span::from("")]
+                    [Line::raw(""), Line::raw("")]
                 };
                 Row::new(vec![
-                    Cell::from(val.bold().into_right_aligned_line()),
-                    Cell::from(idx.into_right_aligned_line()),
+                    Cell::from(val.right_aligned()),
+                    Cell::from(idx.right_aligned()),
                 ])
             })
             .collect();
@@ -301,10 +298,10 @@ impl Widget for Help {
     }
 }
 
-fn format_number(n: &BigDecimal, width: u16) -> String {
+fn format_number<'a, 'b>(n: &'a BigDecimal, width: u16) -> Line<'b> {
     let repr = n.to_string();
     if repr.len() <= width as usize {
-        return repr;
+        return Line::raw(repr);
     }
     // We want to spend our "width budget" on a mix of areas
     // of the string, as we don't know what the user cares about.
@@ -335,15 +332,15 @@ fn format_number(n: &BigDecimal, width: u16) -> String {
     let msb = (budget / parts + (budget % parts)) as usize;
     let lsb = (budget / parts) as usize;
     let mut result = vec![];
-    result.push(&repr[..msb + neg]);
-    result.push(&pow);
-    if let Some(idx) = dot {
-        result.push(&repr[idx - lsb..min(idx + lsb + 1, repr.len())]);
+    result.push(Span::from(String::from(&repr[..msb + neg])));
+    result.push(Span::from(String::from(&pow)).yellow());
+    result.push(Span::from(String::from(if let Some(idx) = dot {
+        &repr[idx - lsb..min(idx + lsb + 1, repr.len())]
     } else {
-        result.push(&repr[repr.len() - lsb..]);
-    }
+        &repr[repr.len() - lsb..]
+    })));
 
-    result.join("")
+    Line::from(result)
 }
 
 #[cfg(test)]
@@ -353,42 +350,42 @@ mod test {
     #[test]
     fn format_regular_number() {
         let n: BigDecimal = "12345".parse().unwrap();
-        assert_eq!(format_number(&n, 10), "12345");
+        assert_eq!(format_number(&n, 10).to_string(), "12345");
     }
 
     #[test]
     fn format_long_number() {
         let n: BigDecimal = "123456789098".parse().unwrap();
-        assert_eq!(format_number(&n, 10), "12[~12~]98");
-        assert_eq!(format_number(&n, 11), "123[~12~]98");
+        assert_eq!(format_number(&n, 10).to_string(), "12[~12~]98");
+        assert_eq!(format_number(&n, 11).to_string(), "123[~12~]98");
     }
 
     #[test]
     fn format_long_negative_number() {
         let n: BigDecimal = "-123456789098".parse().unwrap();
-        assert_eq!(format_number(&n, 10), "-12[~12~]8");
-        assert_eq!(format_number(&n, 9), "-1[~12~]8");
+        assert_eq!(format_number(&n, 10).to_string(), "-12[~12~]8");
+        assert_eq!(format_number(&n, 9).to_string(), "-1[~12~]8");
         // We need at least 9 characters for this...
-        assert_eq!(format_number(&n, 8), "?");
+        assert_eq!(format_number(&n, 8).to_string(), "?");
     }
 
     #[test]
     fn format_long_decimal_number() {
         let n: BigDecimal = "1234567.89098".parse().unwrap();
-        assert_eq!(format_number(&n, 10), "12[~7~]7.8");
-        assert_eq!(format_number(&n, 9), "1[~7~]7.8");
+        assert_eq!(format_number(&n, 10).to_string(), "12[~7~]7.8");
+        assert_eq!(format_number(&n, 9).to_string(), "1[~7~]7.8");
     }
 
     #[test]
     fn format_dont_overflow_decimal() {
         let n: BigDecimal = "12345678909876543.21".parse().unwrap();
-        assert_eq!(format_number(&n, 18), "12345[~17~]543.21");
+        assert_eq!(format_number(&n, 18).to_string(), "12345[~17~]543.21");
     }
 
     #[test]
     fn format_long_negative_decimal_number() {
         let n: BigDecimal = "-1234567.89098".parse().unwrap();
-        assert_eq!(format_number(&n, 10), "-1[~7~]7.8");
+        assert_eq!(format_number(&n, 10).to_string(), "-1[~7~]7.8");
     }
 
     #[test]
