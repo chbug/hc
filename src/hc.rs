@@ -32,7 +32,7 @@ Helix Calc is a simple Reverse Polish Notation calculator.
 
 List of all available operations:
 
-   https://github.com/epthos/epthos
+   https://github.com/chbug/hc
 
 The name is inspired by Helix Editor, and the functionality by the venerable GNU dc.
 "#;
