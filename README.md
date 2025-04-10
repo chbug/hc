@@ -1,7 +1,8 @@
 Helix Calc is a simple Reverse Polish Notation calculator.
 
 It's written in Rust, using [Ratatui](https://ratatui.rs) for the
-cross-platform interface and #bigdecimal for the internal operations.
+cross-platform interface and [bigdecimal-rs](https://github.com/akubera/bigdecimal-rs)
+for the internal operations.
 
 The name is inspired by [Helix Editor](https://helix-editor.com/), and the
 functionality by the venerable GNU dc.

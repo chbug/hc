@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, str::FromStr};
 
-use bigdecimal::{num_bigint::BigInt, BigDecimal, ParseBigDecimalError, Pow, ToPrimitive, Zero};
+use bigdecimal::{BigDecimal, ParseBigDecimalError, Pow, ToPrimitive, Zero, num_bigint::BigInt};
 use thiserror::Error;
 
 use crate::state::State;
@@ -124,9 +124,7 @@ impl Stack {
                     // Arbitrarily cap the number of digits of the result to avoid
                     // accidental freeze / memory blowup when pressing ^ too many times.
                     if BigInt::from(a.bits()) * &b > BigInt::from(MAX_BIT_COUNT) {
-                        return Err(StackError::InvalidArgument(
-                            "chickening out of creating such a large result".into(),
-                        ));
+                        return Err(StackError::InvalidArgument("too big for me".into()));
                     }
                     Ok([a, b])
                 })?;
@@ -388,9 +386,7 @@ mod tests {
         s.apply(Op::Push(2000.into()))?;
         assert_eq!(
             s.apply(Op::Pow),
-            Err(StackError::InvalidArgument(
-                "chickening out of creating such a large result".into()
-            ))
+            Err(StackError::InvalidArgument("too big for me".into()))
         );
 
         Ok(())
