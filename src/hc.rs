@@ -7,7 +7,11 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Cell, Clear, Paragraph, Row, Table, Widget, Wrap},
 };
-use std::{cmp::min, collections::HashMap, str::FromStr};
+use std::{
+    cmp::{max, min},
+    collections::HashMap,
+    str::FromStr,
+};
 use thiserror::Error;
 use tui_textarea::TextArea;
 
@@ -86,8 +90,8 @@ impl App<'_> {
         (&self.stack).into()
     }
 
-    pub fn add_extra(&mut self, extra: String) -> anyhow::Result<()> {
-        for c in extra.chars() {
+    pub fn add_extra<S: AsRef<str>>(&mut self, extra: S) -> anyhow::Result<()> {
+        for c in extra.as_ref().chars() {
             self.handle_key(KeyCode::Char(c))?;
         }
         Ok(())
@@ -206,7 +210,7 @@ impl App<'_> {
                 let stack_index = (index as usize) - 1;
                 let [val, idx] = if stack_index < snapshot.len() {
                     [
-                        format_number(&snapshot[stack_index], area.width - (margin + 1)),
+                        format_number(&snapshot[stack_index], (area.width - (margin + 1)) as u64),
                         Line::raw(format!("{}", index)).style(Color::White),
                     ]
                 } else {
@@ -298,46 +302,67 @@ impl Widget for Help {
     }
 }
 
-fn format_number<'a, 'b>(n: &'a BigDecimal, width: u16) -> Line<'b> {
+fn format_number<'a, 'b>(n: &'a BigDecimal, width: u64) -> Line<'b> {
     let repr = n.to_string();
-    if repr.len() <= width as usize {
+    let total = repr.len() as u64;
+    // Trivial case: the representation already fits the display.
+    if total <= width {
         return Line::raw(repr);
     }
+    // Simple case: we can truncate after the decimal place as we retain
+    // the most important information. We still want to indicate truncation
+    // though, as this is all with fixed precision.
+    let digits_after_dot = max(0, n.fractional_digit_count());
+    let digits_to_dot = total as i64 - digits_after_dot;
+    let digits_before_dot = digits_to_dot - if digits_after_dot > 0 { 1 } else { 0 };
+
+    // Check that we can display the final ~ if we need to truncate.
+    let extra_precision = width as i64 - digits_to_dot - 1;
+    if digits_after_dot > 0 && extra_precision >= 0 {
+        let mut result = vec![];
+        result.push(Span::from(String::from(
+            &repr[..(digits_to_dot + extra_precision) as usize],
+        )));
+        result.push(Span::from(String::from("~")).yellow());
+        return Line::from(result);
+    }
+
+    // More complex case: we want to keep both magnitude information and
+    // details about the number.
+    //
     // We want to spend our "width budget" on a mix of areas
     // of the string, as we don't know what the user cares about.
     // An alternative would be scientific notation, but I'd rather
     // we introduce "display modes" for those.
     //
-    // [SGN][MSB]/.<POW>./[LSB].[RES]
-    let neg = if n < &BigDecimal::zero() { 1 } else { 0 };
-    let dot = repr.find('.');
-    let mut budget = width;
-    budget -= neg as u16; // We need to insert the sign in the end.
-    let mut parts = 2;
-    let pow = if let Some(idx) = dot {
-        parts += 1;
+    // [SGN][MSB][~<POW>~][LSB].[RES]
+    let abs_start = if n < &BigDecimal::zero() { 1 } else { 0 };
+
+    let mut budget = width as i64; // remaining space to allocate.
+    let mut parts = 2; // number of parts to insert from the original representation.
+
+    budget -= abs_start; // We need to insert the sign in the end.
+    if digits_after_dot > 0 {
+        parts += 1; // we need to insert the decimal information.
         budget -= 1; // we need to insert the dot in the end.
-        repr[neg..idx].len()
-    } else {
-        repr[neg..].len()
-    };
-    let pow = format!("[~{}~]", pow);
-    budget -= pow.len() as u16; // we need to insert the magnitude back.
+    }
+    let pow = format!("[~{}~]", digits_before_dot - abs_start);
+    budget -= pow.len() as i64; // we need to insert the magnitude back.
     if budget < parts {
         // Don't have enough space to represent this :(
-        return "?".into();
+        return Line::from(Span::from(String::from("~")).red());
     }
     // We can now split the budget in "parts" and allocate the remainder to
     // [MSB] as it carries most of the information.
     let msb = (budget / parts + (budget % parts)) as usize;
     let lsb = (budget / parts) as usize;
     let mut result = vec![];
-    result.push(Span::from(String::from(&repr[..msb + neg])));
+    result.push(Span::from(String::from(&repr[..msb + abs_start as usize])));
     result.push(Span::from(String::from(&pow)).yellow());
-    result.push(Span::from(String::from(if let Some(idx) = dot {
-        &repr[idx - lsb..min(idx + lsb + 1, repr.len())]
+    result.push(Span::from(String::from(if digits_after_dot > 0 {
+        &repr[digits_to_dot as usize - lsb - 1..min(digits_to_dot as usize + lsb, total as usize)]
     } else {
-        &repr[repr.len() - lsb..]
+        &repr[total as usize - lsb..]
     })));
 
     Line::from(result)
@@ -366,14 +391,13 @@ mod test {
         assert_eq!(format_number(&n, 10).to_string(), "-12[~12~]8");
         assert_eq!(format_number(&n, 9).to_string(), "-1[~12~]8");
         // We need at least 9 characters for this...
-        assert_eq!(format_number(&n, 8).to_string(), "?");
+        assert_eq!(format_number(&n, 8).to_string(), "~");
     }
 
     #[test]
     fn format_long_decimal_number() {
-        let n: BigDecimal = "1234567.89098".parse().unwrap();
-        assert_eq!(format_number(&n, 10).to_string(), "12[~7~]7.8");
-        assert_eq!(format_number(&n, 9).to_string(), "1[~7~]7.8");
+        let n: BigDecimal = "12345678.34567".parse().unwrap();
+        assert_eq!(format_number(&n, 9).to_string(), "1[~8~]8.3");
     }
 
     #[test]
@@ -384,15 +408,35 @@ mod test {
 
     #[test]
     fn format_long_negative_decimal_number() {
-        let n: BigDecimal = "-1234567.89098".parse().unwrap();
-        assert_eq!(format_number(&n, 10).to_string(), "-1[~7~]7.8");
+        let n: BigDecimal = "-12345678.34567".parse().unwrap();
+        assert_eq!(format_number(&n, 10).to_string(), "-1[~8~]8.3");
+    }
+
+    #[test]
+    fn truncate_decimal_part() {
+        let n: BigDecimal = "0.123456789".parse().unwrap();
+        assert_eq!(format_number(&n, 4).to_string(), "0.1~");
+        let n: BigDecimal = "10.12345678".parse().unwrap();
+        assert_eq!(format_number(&n, 4).to_string(), "10.~");
+    }
+
+    #[test]
+    fn handle_negative_scale() {
+        let n: BigDecimal = "100000000000".parse().unwrap();
+        let n = n.normalized();
+        assert_eq!(format_number(&n, 10).to_string(), "10[~12~]00");
     }
 
     #[test]
     fn validate_display_of_long_numbers() -> anyhow::Result<()> {
         let mut app = App::new(State::default())?;
-        app.add_extra("10000000 100000000 *".into())?;
+        app.add_extra("10000000 100000000 *")?;
 
+        assert_eq!(render(app)?, "1000[~16~]0000     1");
+        Ok(())
+    }
+
+    fn render(app: App) -> anyhow::Result<String> {
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 6));
         app.render(buf.area, &mut buf);
 
@@ -401,7 +445,6 @@ mod test {
             let c = buf[(x, 1)].symbol();
             line.push_str(c);
         }
-        assert_eq!(line, "1000[~16~]0000     1");
-        Ok(())
+        Ok(line)
     }
 }
