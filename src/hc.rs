@@ -233,7 +233,9 @@ impl App<'_> {
                     if let Some(c) = self.op {
                         Line::from(format!("<{}>", c).blue().bold())
                     } else {
-                        Line::from("")
+                        format!("Precision: {}", self.stack.precision())
+                            .blue()
+                            .into_right_aligned_line()
                     }
                 } else if self.input_value().is_ok() {
                     Line::from(vec!["<Enter>".bold().blue(), " to add to the stack".into()])

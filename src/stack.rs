@@ -48,10 +48,10 @@ impl Stack {
         }
     }
 
-    pub fn from(values: Vec<BigDecimal>) -> Stack {
+    pub fn from(values: Vec<BigDecimal>, precision: Option<u64>) -> Stack {
         Stack {
             s: values.into(),
-            precision: 12,
+            precision: precision.unwrap_or(12),
         }
     }
 
@@ -182,6 +182,11 @@ impl Stack {
             .collect()
     }
 
+    // Return the precision of the display.
+    pub fn precision(&self) -> u64 {
+        self.precision
+    }
+
     // Validate a segment of the stack through a user-provided function and return it.
     // Note: the elements are returned in the reverse order of the stack, which is the
     // natural order for running operations.
@@ -232,7 +237,7 @@ impl TryFrom<State> for Stack {
         for v in value.stack {
             values.push(BigDecimal::from_str(&v)?);
         }
-        Ok(Stack::from(values))
+        Ok(Stack::from(values, value.precision))
     }
 }
 

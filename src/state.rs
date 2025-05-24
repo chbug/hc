@@ -13,12 +13,14 @@ use crate::stack::Stack;
 #[derive(Serialize, Deserialize, Default)]
 pub struct State {
     pub stack: Vec<String>,
+    pub precision: Option<u64>,
 }
 
 impl From<&Stack> for State {
     fn from(stack: &Stack) -> Self {
         State {
             stack: stack.snapshot().iter().map(|v| v.to_string()).collect(),
+            precision: Some(stack.precision()),
         }
     }
 }
