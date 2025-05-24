@@ -113,7 +113,7 @@ impl App<'_> {
                 self.op = Some(c);
                 self.stack
                     .apply(self.ops[&c].clone())
-                    .map_err(|e| AppError::StackError(e))?;
+                    .map_err(AppError::StackError)?;
             }
             _ => {
                 let event = KeyEvent::new(k, KeyModifiers::empty());
@@ -180,7 +180,7 @@ impl App<'_> {
         let v = self.input_value()?;
         self.stack
             .apply(Op::Push(v))
-            .map_err(|e| AppError::StackError(e))?;
+            .map_err(AppError::StackError)?;
         self.textarea = TextArea::default();
         Ok(())
     }
@@ -289,7 +289,7 @@ impl Widget for Help {
         let horizontal = Layout::horizontal([Constraint::Percentage(50)]).flex(Flex::Center);
         let [area] = vertical.areas(area);
         let [area] = horizontal.areas(area);
-        Clear::default().render(area, buf);
+        Clear.render(area, buf);
 
         Paragraph::new(Text::from(HELP_MSG))
             .block(Block::bordered().title(" Help").bg(Color::Black))
@@ -298,7 +298,7 @@ impl Widget for Help {
     }
 }
 
-fn format_number<'a, 'b>(n: &'a BigDecimal, width: u64) -> Line<'b> {
+fn format_number<'b>(n: &BigDecimal, width: u64) -> Line<'b> {
     let repr = n.normalized().to_plain_string();
     let total = repr.len() as u64;
     // Trivial case: the representation already fits the display.
@@ -318,11 +318,12 @@ fn format_number<'a, 'b>(n: &'a BigDecimal, width: u64) -> Line<'b> {
     // Check that we can display the final ~ if we need to truncate.
     let extra_precision = width as i64 - digits_to_dot - 1;
     if digits_after_dot > 0 && extra_precision >= 0 {
-        let mut result = vec![];
-        result.push(Span::from(String::from(
-            &repr[..(digits_to_dot + extra_precision) as usize],
-        )));
-        result.push(Span::from(String::from("~")).yellow());
+        let result = vec![
+            Span::from(String::from(
+                &repr[..(digits_to_dot + extra_precision) as usize],
+            )),
+            Span::from(String::from("~")).yellow(),
+        ];
         return Line::from(result);
     }
 
@@ -355,15 +356,16 @@ fn format_number<'a, 'b>(n: &'a BigDecimal, width: u64) -> Line<'b> {
     // [MSB] as it carries most of the information.
     let msb = (budget / parts + (budget % parts)) as usize;
     let lsb = (budget / parts) as usize;
-    let mut result = vec![];
-    result.push(Span::from(String::from(&repr[..msb + abs_start as usize])));
-    result.push(Span::from(String::from(&pow)).yellow());
-    result.push(Span::from(String::from(if digits_after_dot > 0 {
-        &repr[digits_to_dot as usize - lsb - 1..min(digits_to_dot as usize + lsb, total as usize)]
-    } else {
-        &repr[total as usize - lsb..]
-    })));
-
+    let result = vec![
+        Span::from(String::from(&repr[..msb + abs_start as usize])),
+        Span::from(String::from(&pow)).yellow(),
+        Span::from(String::from(if digits_after_dot > 0 {
+            &repr[digits_to_dot as usize - lsb - 1
+                ..min(digits_to_dot as usize + lsb, total as usize)]
+        } else {
+            &repr[total as usize - lsb..]
+        })),
+    ];
     Line::from(result)
 }
 
