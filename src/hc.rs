@@ -346,7 +346,7 @@ fn format_number<'a, 'b>(n: &'a BigDecimal, width: u64) -> Line<'b> {
         parts += 1; // we need to insert the decimal information.
         budget -= 1; // we need to insert the dot in the end.
     }
-    let pow = format!("[~{}~]", digits_before_dot - abs_start);
+    let pow = format!("~{}~", digits_before_dot - abs_start);
     budget -= pow.len() as i64; // we need to insert the magnitude back.
     if budget < parts {
         // Don't have enough space to represent this :(
@@ -381,35 +381,35 @@ mod test {
     #[test]
     fn format_long_number() {
         let n: BigDecimal = "123456789098".parse().unwrap();
-        assert_eq!(format_number(&n, 10).to_string(), "12[~12~]98");
-        assert_eq!(format_number(&n, 11).to_string(), "123[~12~]98");
+        assert_eq!(format_number(&n, 10).to_string(), "123~12~098");
+        assert_eq!(format_number(&n, 11).to_string(), "1234~12~098");
     }
 
     #[test]
     fn format_long_negative_number() {
         let n: BigDecimal = "-123456789098".parse().unwrap();
-        assert_eq!(format_number(&n, 10).to_string(), "-12[~12~]8");
-        assert_eq!(format_number(&n, 9).to_string(), "-1[~12~]8");
-        // We need at least 9 characters for this...
-        assert_eq!(format_number(&n, 8).to_string(), "~");
+        assert_eq!(format_number(&n, 8).to_string(), "-12~12~8");
+        assert_eq!(format_number(&n, 7).to_string(), "-1~12~8");
+        // We need at least 7 characters for this...
+        assert_eq!(format_number(&n, 6).to_string(), "~");
     }
 
     #[test]
     fn format_long_decimal_number() {
         let n: BigDecimal = "12345678.34567".parse().unwrap();
-        assert_eq!(format_number(&n, 9).to_string(), "1[~8~]8.3");
+        assert_eq!(format_number(&n, 7).to_string(), "1~8~8.3");
     }
 
     #[test]
     fn format_dont_overflow_decimal() {
         let n: BigDecimal = "12345678909876543.21".parse().unwrap();
-        assert_eq!(format_number(&n, 18).to_string(), "12345[~17~]543.21");
+        assert_eq!(format_number(&n, 18).to_string(), "12345~17~6543.21");
     }
 
     #[test]
     fn format_long_negative_decimal_number() {
         let n: BigDecimal = "-12345678.34567".parse().unwrap();
-        assert_eq!(format_number(&n, 10).to_string(), "-1[~8~]8.3");
+        assert_eq!(format_number(&n, 8).to_string(), "-1~8~8.3");
     }
 
     #[test]
@@ -424,7 +424,7 @@ mod test {
     fn handle_negative_scale() {
         let n: BigDecimal = "100000000000".parse().unwrap();
         let n = n.normalized();
-        assert_eq!(format_number(&n, 10).to_string(), "10[~12~]00");
+        assert_eq!(format_number(&n, 10).to_string(), "100~12~000");
     }
 
     #[test]
@@ -432,7 +432,7 @@ mod test {
         let mut app = App::new(State::default())?;
         app.add_extra("10000000 100000000 *")?;
 
-        assert_eq!(render(app)?, "1000[~16~]0000     1");
+        assert_eq!(render(app)?, "10000~16~00000     1");
         Ok(())
     }
 
