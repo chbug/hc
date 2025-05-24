@@ -2,7 +2,7 @@ use bigdecimal::{BigDecimal, Zero};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::{Alignment, Constraint, Flex, Layout, Rect},
     style::{Color, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Cell, Clear, Paragraph, Row, Table, Widget, Wrap},
@@ -27,15 +27,30 @@ pub struct App<'a> {
     op_status: Result<(), AppError>,
 }
 
-const HELP_MSG: &str = r#"
-Helix Calc is a simple Reverse Polish Notation calculator.
-
-List of all available operations:
-
-   https://github.com/chbug/hc
-
-The name is inspired by Helix Editor, and the functionality by the venerable GNU dc.
-"#;
+fn help() -> Text<'static> {
+    let lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from("Helix Calc is a simple Reverse Polish Notation calculator."),
+        Line::from(""),
+        Line::from("It supports numbers of arbitrary length, and uses ~ to indicate when"),
+        Line::from("a number is truncated. For instance, 1e100 will be represented as"),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("10000000000000000000"),
+            "~101~".yellow(),
+            Span::raw("0000000000000000000"),
+        ]),
+        Line::from(""),
+        Line::from("... to indicate the total number of digits."),
+        Line::from(""),
+        Line::from("List of all available operations:"),
+        Line::from("   https://github.com/chbug/hc"),
+        Line::from(""),
+        Line::from("The name is inspired by Helix Editor,"),
+        Line::from("and the functionality by the venerable GNU dc."),
+    ];
+    Text::from(lines)
+}
 
 #[derive(Error, Debug, PartialEq)]
 enum AppError {
@@ -301,9 +316,10 @@ impl Widget for Help {
         let [area] = horizontal.areas(area);
         Clear.render(area, buf);
 
-        Paragraph::new(Text::from(HELP_MSG))
+        Paragraph::new(help())
             .block(Block::bordered().title(" Help").bg(Color::Black))
             .wrap(Wrap { trim: false })
+            .alignment(Alignment::Center)
             .render(area, buf);
     }
 }

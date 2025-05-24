@@ -19,6 +19,7 @@ This is a toy app that fulfills my personal needs, but I'm open to PR :)
 - `v` : compute the square root of the top value.
 - `k` : pop the top value and use it to set the precision.
 - `r` : swap the first two values.
+- [Up]: edit the value at the top of the stack.
 
 ## Negative numbers
 
