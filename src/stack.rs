@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, str::FromStr};
 
-use bigdecimal::{BigDecimal, ParseBigDecimalError, Pow, ToPrimitive, Zero, num_bigint::BigInt};
+use bigdecimal::{num_bigint::BigInt, BigDecimal, ParseBigDecimalError, Pow, ToPrimitive, Zero};
 use thiserror::Error;
 
 use crate::state::State;

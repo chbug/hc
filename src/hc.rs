@@ -7,11 +7,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Cell, Clear, Paragraph, Row, Table, Widget, Wrap},
 };
-use std::{
-    cmp::{max, min},
-    collections::HashMap,
-    str::FromStr,
-};
+use std::{cmp::min, collections::HashMap, str::FromStr};
 use thiserror::Error;
 use tui_textarea::TextArea;
 
@@ -303,7 +299,7 @@ impl Widget for Help {
 }
 
 fn format_number<'a, 'b>(n: &'a BigDecimal, width: u64) -> Line<'b> {
-    let repr = n.to_string();
+    let repr = n.normalized().to_plain_string();
     let total = repr.len() as u64;
     // Trivial case: the representation already fits the display.
     if total <= width {
@@ -312,10 +308,13 @@ fn format_number<'a, 'b>(n: &'a BigDecimal, width: u64) -> Line<'b> {
     // Simple case: we can truncate after the decimal place as we retain
     // the most important information. We still want to indicate truncation
     // though, as this is all with fixed precision.
-    let digits_after_dot = max(0, n.fractional_digit_count());
+    let digits_after_dot = if let Some(idx) = repr.find('.') {
+        (total - idx as u64 - 1) as i64
+    } else {
+        0
+    };
     let digits_to_dot = total as i64 - digits_after_dot;
     let digits_before_dot = digits_to_dot - if digits_after_dot > 0 { 1 } else { 0 };
-
     // Check that we can display the final ~ if we need to truncate.
     let extra_precision = width as i64 - digits_to_dot - 1;
     if digits_after_dot > 0 && extra_precision >= 0 {
@@ -433,6 +432,23 @@ mod test {
         app.add_extra("10000000 100000000 *")?;
 
         assert_eq!(render(app)?, "10000~16~00000     1");
+        Ok(())
+    }
+
+    #[test]
+    fn trim_unneeded_zeros() {
+        let n: BigDecimal = "0.000100000".parse().unwrap();
+        assert_eq!(format_number(&n, 10).to_string(), "0.0001");
+        let n: BigDecimal = "1e100".parse().unwrap();
+        assert_eq!(format_number(&n, 10).to_string(), "100~101~00");
+    }
+
+    #[test]
+    fn normalize_scientific_numbers() -> anyhow::Result<()> {
+        let mut app = App::new(State::default())?;
+        app.add_extra("1e100 ")?;
+
+        assert_eq!(render(app)?, "10000~101~0000     1");
         Ok(())
     }
 

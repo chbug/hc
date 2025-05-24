@@ -26,3 +26,9 @@ Two options to enter them:
 
 - Type them as `_123`.
 - Type them as `123-` (careful, no space).
+
+## Limitations
+
+By default, BigDecimal is compiled with a max precision of 100 digits: beyond
+that size, decimal places will be dropped, even if the integer part can handle
+much larger numbers.
