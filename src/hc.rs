@@ -96,6 +96,14 @@ impl App<'_> {
     fn handle_key(&mut self, k: KeyCode) -> Result<(), AppError> {
         let empty = self.input_is_empty();
         match k {
+            KeyCode::Up => {
+                // Edit the top entry if there is one and the editor is empty.
+                if self.input_is_empty() {
+                    if let Some(n) = self.stack.pop_front() {
+                        self.textarea = TextArea::from([n.to_plain_string()]);
+                    }
+                }
+            }
             KeyCode::Char('q') => {
                 self.exit = true;
             }
@@ -104,7 +112,7 @@ impl App<'_> {
             }
             KeyCode::Char('-') if !empty => {
                 let v = self.input_value()?;
-                self.textarea = TextArea::from([format!("{}", -v)]);
+                self.textarea = TextArea::from([(-v).to_plain_string()]);
             }
             KeyCode::Char(c) if self.ops.contains_key(&c) => {
                 if !empty {

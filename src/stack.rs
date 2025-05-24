@@ -187,6 +187,10 @@ impl Stack {
         self.precision
     }
 
+    pub fn pop_front(&mut self) -> Option<BigDecimal> {
+        self.s.pop_front()
+    }
+
     // Validate a segment of the stack through a user-provided function and return it.
     // Note: the elements are returned in the reverse order of the stack, which is the
     // natural order for running operations.
