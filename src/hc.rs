@@ -126,8 +126,12 @@ impl App<'_> {
                 self.input_consume()?;
             }
             KeyCode::Char('-') if !empty => {
-                let v = self.input_value()?;
-                self.textarea = TextArea::from([(-v).to_plain_string()]);
+                if let Ok(v) = self.input_value() {
+                    self.textarea = TextArea::from([(-v).to_plain_string()]);
+                } else {
+                    let event = KeyEvent::new(k, KeyModifiers::empty());
+                    self.textarea.input(event);
+                }
             }
             KeyCode::Char(c) if self.ops.contains_key(&c) => {
                 if !empty {
