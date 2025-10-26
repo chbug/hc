@@ -11,6 +11,53 @@ pub struct Stack {
     precision: u64,
 }
 
+pub struct Undoable<T>
+where
+    T: Clone,
+{
+    history: Vec<T>,
+    current: usize,
+}
+
+impl<T> Undoable<T>
+where
+    T: Clone,
+{
+    pub fn new(start: T) -> Undoable<T> {
+        Undoable {
+            history: vec![start],
+            current: 0,
+        }
+    }
+
+    pub fn fwd(&mut self) -> &mut T {
+        self.history.truncate(self.current + 1);
+        self.history.push(self.history[self.current].clone());
+        self.current += 1;
+        &mut (self.history[self.current])
+    }
+
+    pub fn undo(&mut self) -> bool {
+        if self.current == 0 {
+            return false;
+        }
+        self.current -= 1;
+        return true;
+    }
+
+    pub fn redo(&mut self) -> bool {
+        if self.current >= self.history.len() - 1 {
+            return false;
+        }
+        self.current += 1;
+        return true;
+    }
+
+    pub fn current(&mut self) -> &mut T {
+        &mut (self.history[self.current])
+    }
+}
+
 #[derive(Error, Debug, PartialEq)]
 pub enum StackError {
     #[error("operation requires {0} elements")]
@@ -246,7 +293,60 @@ impl TryFrom<State> for Stack {
 }
 
 #[cfg(test)]
-mod tests {
+mod undoable_tests {
+    use super::*;
+
+    #[test]
+    fn empty() {
+        let mut u: Undoable<i32> = Undoable::new(0);
+        assert!(!u.undo());
+        assert!(!u.redo());
+    }
+
+    #[test]
+    fn fwd() {
+        let mut u: Undoable<i32> = Undoable::new(0);
+        let new = u.fwd();
+        assert_eq!(0, *new);
+        *new = 1;
+        let new = u.fwd();
+        assert_eq!(1, *new);
+        *new = 2;
+        assert_eq!(2, *u.current());
+    }
+
+    #[test]
+    fn undo() {
+        let mut u: Undoable<i32> = Undoable::new(0);
+        let new = u.fwd();
+        assert_eq!(0, *new);
+        *new = 1;
+        assert_eq!(1, *u.current());
+        // Undo leads to the previous value.
+        assert!(u.undo());
+        assert_eq!(0, *u.current());
+        // ...and fwd from there ignores the previous value.
+        assert_eq!(0, *u.fwd());
+    }
+
+    #[test]
+    fn redo() {
+        let mut u: Undoable<i32> = Undoable::new(0);
+        let new = u.fwd();
+        assert_eq!(0, *new);
+        *new = 1;
+        assert_eq!(1, *u.current());
+        // Undo leads to the previous value.
+        assert!(u.undo());
+        assert_eq!(0, *u.current());
+        // ...and redo brings back the most recent one.
+        assert!(u.redo());
+        assert_eq!(1, *u.fwd());
+    }
+}
+
+#[cfg(test)]
+mod stack_tests {
     use bigdecimal::num_bigint::{self};
 
     use super::*;
