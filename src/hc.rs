@@ -80,6 +80,8 @@ impl App<'_> {
                 ('P', Op::Pop),
                 ('k', Op::Precision),
                 ('r', Op::Rotate),
+                ('u', Op::Undo),
+                ('U', Op::Redo),
             ]),
             op: None,
             op_status: Ok(()),
@@ -114,7 +116,7 @@ impl App<'_> {
             KeyCode::Up => {
                 // Edit the top entry if there is one and the editor is empty.
                 if self.input_is_empty() {
-                    if let Some(n) = self.stack.pop_front() {
+                    if let Some(n) = self.stack.edit_top() {
                         self.textarea = TextArea::from([n.to_plain_string()]);
                     }
                 }
