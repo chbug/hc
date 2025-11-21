@@ -22,6 +22,7 @@ pub struct App<'a> {
     textarea: TextArea<'a>,
     stack: Stack,
     help: bool,
+    separator: bool,
     ops: HashMap<char, Op>,
     op: Option<char>,
     op_status: Result<(), AppError>,
@@ -68,6 +69,7 @@ impl App<'_> {
             textarea: TextArea::default(),
             stack: state.try_into()?,
             help: false,
+            separator: false,
             ops: HashMap::from([
                 ('+', Op::Add),
                 ('-', Op::Subtract),
@@ -123,6 +125,9 @@ impl App<'_> {
             }
             KeyCode::Char('q') => {
                 self.exit = true;
+            }
+            KeyCode::Char('\'') => {
+                self.separator = !self.separator;
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 self.input_consume()?;
@@ -235,7 +240,11 @@ impl App<'_> {
                 let stack_index = (index as usize) - 1;
                 let [val, idx] = if stack_index < snapshot.len() {
                     [
-                        format_number(&snapshot[stack_index], (area.width - (margin + 1)) as u64),
+                        format_number(
+                            &snapshot[stack_index],
+                            (area.width - (margin + 1)) as u64,
+                            self.separator,
+                        ),
                         Line::raw(format!("{}", index)).style(Color::White),
                     ]
                 } else {
@@ -330,11 +339,42 @@ impl Widget for Help {
     }
 }
 
-fn format_number<'b>(n: &BigDecimal, width: u64) -> Line<'b> {
+fn add_separators(repr: &str) -> String {
+    let (sign, rest) = if repr.starts_with('-') {
+        ("-", &repr[1..])
+    } else {
+        ("", &repr[..])
+    };
+    let (digits, rest) = if let Some(idx) = rest.find('.') {
+        (&rest[..idx], &rest[idx..])
+    } else {
+        (rest, "")
+    };
+    let mut result = String::new();
+    let len = digits.len();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            result.push(' ');
+        }
+        result.push(ch);
+    }
+    format!("{}{}{}", sign, result, rest)
+}
+
+fn format_number<'b>(n: &BigDecimal, width: u64, separator: bool) -> Line<'b> {
     let repr = n.normalized().to_plain_string();
     let total = repr.len() as u64;
     // Trivial case: the representation already fits the display.
     if total <= width {
+        if !separator {
+            return Line::raw(repr);
+        }
+        let separated_repr = add_separators(&repr);
+        // It's probably still better to remove the separators than to switch to
+        // extended representation if the size is a bit tight.
+        if separated_repr.len() as u64 <= width {
+            return Line::raw(separated_repr);
+        }
         return Line::raw(repr);
     }
     // Simple case: we can truncate after the decimal place as we retain
@@ -408,56 +448,80 @@ mod test {
     #[test]
     fn format_regular_number() {
         let n: BigDecimal = "12345".parse().unwrap();
-        assert_eq!(format_number(&n, 10).to_string(), "12345");
+        assert_eq!(format_number(&n, 10, false).to_string(), "12345");
+    }
+
+    #[test]
+    fn format_regular_number_with_separators() {
+        let n: BigDecimal = "12345".parse().unwrap();
+        assert_eq!(format_number(&n, 10, true).to_string(), "12 345");
+    }
+
+    #[test]
+    fn negative_number_with_separators() {
+        let n: BigDecimal = "-12345".parse().unwrap();
+        assert_eq!(format_number(&n, 10, true).to_string(), "-12 345");
+    }
+
+    #[test]
+    fn negative_number_with_separators_and_decimals() {
+        let n: BigDecimal = "-12345.6789".parse().unwrap();
+        assert_eq!(format_number(&n, 15, true).to_string(), "-12 345.6789");
+    }
+
+    #[test]
+    fn drop_separators_under_pressure() {
+        let n: BigDecimal = "123456789".parse().unwrap();
+        assert_eq!(format_number(&n, 10, true).to_string(), "123456789");
     }
 
     #[test]
     fn format_long_number() {
         let n: BigDecimal = "123456789098".parse().unwrap();
-        assert_eq!(format_number(&n, 10).to_string(), "123~12~098");
-        assert_eq!(format_number(&n, 11).to_string(), "1234~12~098");
+        assert_eq!(format_number(&n, 10, false).to_string(), "123~12~098");
+        assert_eq!(format_number(&n, 11, false).to_string(), "1234~12~098");
     }
 
     #[test]
     fn format_long_negative_number() {
         let n: BigDecimal = "-123456789098".parse().unwrap();
-        assert_eq!(format_number(&n, 8).to_string(), "-12~12~8");
-        assert_eq!(format_number(&n, 7).to_string(), "-1~12~8");
+        assert_eq!(format_number(&n, 8, false).to_string(), "-12~12~8");
+        assert_eq!(format_number(&n, 7, false).to_string(), "-1~12~8");
         // We need at least 7 characters for this...
-        assert_eq!(format_number(&n, 6).to_string(), "~");
+        assert_eq!(format_number(&n, 6, false).to_string(), "~");
     }
 
     #[test]
     fn format_long_decimal_number() {
         let n: BigDecimal = "12345678.34567".parse().unwrap();
-        assert_eq!(format_number(&n, 7).to_string(), "1~8~8.3");
+        assert_eq!(format_number(&n, 7, false).to_string(), "1~8~8.3");
     }
 
     #[test]
     fn format_dont_overflow_decimal() {
         let n: BigDecimal = "12345678909876543.21".parse().unwrap();
-        assert_eq!(format_number(&n, 18).to_string(), "12345~17~6543.21");
+        assert_eq!(format_number(&n, 18, false).to_string(), "12345~17~6543.21");
     }
 
     #[test]
     fn format_long_negative_decimal_number() {
         let n: BigDecimal = "-12345678.34567".parse().unwrap();
-        assert_eq!(format_number(&n, 8).to_string(), "-1~8~8.3");
+        assert_eq!(format_number(&n, 8, false).to_string(), "-1~8~8.3");
     }
 
     #[test]
     fn truncate_decimal_part() {
         let n: BigDecimal = "0.123456789".parse().unwrap();
-        assert_eq!(format_number(&n, 4).to_string(), "0.1~");
+        assert_eq!(format_number(&n, 4, false).to_string(), "0.1~");
         let n: BigDecimal = "10.12345678".parse().unwrap();
-        assert_eq!(format_number(&n, 4).to_string(), "10.~");
+        assert_eq!(format_number(&n, 4, false).to_string(), "10.~");
     }
 
     #[test]
     fn handle_negative_scale() {
         let n: BigDecimal = "100000000000".parse().unwrap();
         let n = n.normalized();
-        assert_eq!(format_number(&n, 10).to_string(), "100~12~000");
+        assert_eq!(format_number(&n, 10, false).to_string(), "100~12~000");
     }
 
     #[test]
@@ -472,9 +536,9 @@ mod test {
     #[test]
     fn trim_unneeded_zeros() {
         let n: BigDecimal = "0.000100000".parse().unwrap();
-        assert_eq!(format_number(&n, 10).to_string(), "0.0001");
+        assert_eq!(format_number(&n, 10, false).to_string(), "0.0001");
         let n: BigDecimal = "1e100".parse().unwrap();
-        assert_eq!(format_number(&n, 10).to_string(), "100~101~00");
+        assert_eq!(format_number(&n, 10, false).to_string(), "100~101~00");
     }
 
     #[test]

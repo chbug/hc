@@ -21,6 +21,7 @@ This is a toy app that fulfills my personal needs, but I'm open to PR :)
 - `r` : swap the first two values.
 - `u` : undo the last operation.
 - `U` : redo the last undone operation.
+- `'` : toggle decimal separator.
 - `[Up]`: edit the value at the top of the stack.
 
 ## Negative numbers
