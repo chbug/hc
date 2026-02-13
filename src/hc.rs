@@ -1,3 +1,7 @@
+use crate::{
+    stack::{Op, Stack, StackError},
+    state::State,
+};
 use bigdecimal::{BigDecimal, Zero};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
@@ -5,52 +9,26 @@ use ratatui::{
     layout::{Alignment, Constraint, Flex, Layout, Rect},
     style::{Color, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Cell, Clear, Paragraph, Row, Table, Widget, Wrap},
+    widgets::{
+        Block, Cell, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        StatefulWidget, Table, Widget, Wrap,
+    },
 };
 use std::{cmp::min, collections::HashMap, str::FromStr};
 use thiserror::Error;
 use tui_textarea::TextArea;
 
-use crate::{
-    stack::{Op, Stack, StackError},
-    state::State,
-};
-
+/// Overall state of the app.
 pub struct App<'a> {
-    exit: bool,
-    valid: bool,
-    textarea: TextArea<'a>,
-    stack: Stack,
-    help: bool,
-    separator: bool,
-    ops: HashMap<char, Op>,
-    op: Option<char>,
-    op_status: Result<(), AppError>,
-}
-
-fn help() -> Text<'static> {
-    let lines: Vec<Line> = vec![
-        Line::from(""),
-        Line::from("Helix Calc is a simple Reverse Polish Notation calculator."),
-        Line::from(""),
-        Line::from("It supports numbers of arbitrary length, and uses ~ to indicate when"),
-        Line::from("a number is truncated. For instance, 1e100 will be represented as"),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("10000000000000000000"),
-            "~101~".yellow(),
-            Span::raw("0000000000000000000"),
-        ]),
-        Line::from(""),
-        Line::from("... to indicate the total number of digits."),
-        Line::from(""),
-        Line::from("List of all available operations:"),
-        Line::from("   https://github.com/chbug/hc"),
-        Line::from(""),
-        Line::from("The name is inspired by Helix Editor,"),
-        Line::from("and the functionality by the venerable GNU dc."),
-    ];
-    Text::from(lines)
+    exit: bool,                      // If true, exit.
+    valid: bool,                     // Whether the textarea contains a valid number.
+    textarea: TextArea<'a>,          // The input textarea.
+    stack: Stack,                    // The stack of big numbers.
+    help: Help,                      // The help widget and its display state.
+    separator: bool,                 // If true, show decimal separator.
+    ops: HashMap<char, Op>,          // The known operations on the stack.
+    op: Option<char>,                // The latest operation.
+    op_status: Result<(), AppError>, // The latest status.
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -68,7 +46,7 @@ impl App<'_> {
             valid: true,
             textarea: TextArea::default(),
             stack: state.try_into()?,
-            help: false,
+            help: Help::default(),
             separator: false,
             ops: HashMap::from([
                 ('+', Op::Add),
@@ -90,11 +68,12 @@ impl App<'_> {
         })
     }
 
+    /// The app's main loop.
     pub fn run(&mut self, term: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
         self.update_valid();
         while !self.exit {
             term.draw(|frame| {
-                frame.render_widget(&*self, frame.area());
+                frame.render_widget(&mut *self, frame.area());
             })?;
             self.handle_events()?;
         }
@@ -113,6 +92,10 @@ impl App<'_> {
     }
 
     fn handle_key(&mut self, k: KeyCode) -> Result<(), AppError> {
+        if self.help.visible {
+            self.help.handle_key(k);
+            return Ok(());
+        }
         let empty = self.input_is_empty();
         match k {
             KeyCode::Up => {
@@ -122,6 +105,9 @@ impl App<'_> {
                         self.textarea = TextArea::from([n.to_plain_string()]);
                     }
                 }
+            }
+            KeyCode::Char('?') => {
+                self.help.visible = true;
             }
             KeyCode::Char('q') => {
                 self.exit = true;
@@ -171,14 +157,7 @@ impl App<'_> {
                     KeyCode::Esc => KeyCode::Char('q'),
                     c => c,
                 };
-                match keycode {
-                    KeyCode::Char('?') => {
-                        self.help = !self.help;
-                    }
-                    c => {
-                        self.op_status = self.handle_key(c);
-                    }
-                }
+                self.op_status = self.handle_key(keycode);
             }
             _ => {}
         };
@@ -296,7 +275,7 @@ impl App<'_> {
     }
 }
 
-impl Widget for &App<'_> {
+impl Widget for &mut App<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let [page] = Layout::horizontal([Constraint::Length(50)])
             .flex(Flex::Center)
@@ -313,29 +292,164 @@ impl Widget for &App<'_> {
         self.render_stack(&stack_area).render(stack_area, buf);
         self.textarea.render(input_area, buf);
         self.render_status().render(status_area, buf);
+        self.help.render(area, buf);
+    }
+}
 
-        if self.help {
-            Help::default().render(area, buf);
+fn help() -> Text<'static> {
+    let lines: Vec<Line> = vec![
+        Line::from("Helix Calc is a Reverse Polish Notation calculator."),
+        Line::from(""),
+        Line::from("Operators manipulate the stack of values [S1, S2, ...]:"),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  "),
+            "+ - * /".blue(),
+            Span::raw(" : perform the arithmetic operation on S2 and S1"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "%".blue(),
+            Span::raw(" : compute the modulo of S2 divided by S1"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "^".blue(),
+            Span::raw(" : raise S2 to the power of S1"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "P".blue(),
+            Span::raw(" : pop S1 off the stack"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "d".blue(),
+            Span::raw(" : duplicate S1"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "v".blue(),
+            Span::raw(" : compute the square root of S1"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "k".blue(),
+            Span::raw(" : pop S1 and use it to set the precision"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "r".blue(),
+            Span::raw(" : swap S1 and S2"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "u".blue(),
+            Span::raw(" : undo the last operation"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "U".blue(),
+            Span::raw(" : redo the last undone operation"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "'".blue(),
+            Span::raw(" : toggle the decimal separator"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "[Up]".blue(),
+            Span::raw(" : edit S1"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Negative numbers can be entered as "),
+            "_123".blue(),
+            Span::raw(" or as "),
+            "123-".blue(),
+            Span::raw(" (no space between the digits and the sign)."),
+        ]),
+        Line::from(""),
+        Line::from("Helix Calc supports numbers of arbitrary length, and uses ~ to indicate when a number is truncated."),
+        Line::from("For instance, 1e100 will be represented as:"),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("10000000000000000000"),
+            "~101~".yellow(),
+            Span::raw("0000000000000000000"),
+        ]),
+        Line::from(""),
+        Line::from("Check out the code and report bugs at:"),
+        Line::from("   https://github.com/chbug/hc"),
+        Line::from(""),
+        Line::from("The name is inspired by Helix Editor, and the functionality by the venerable GNU dc."),
+    ];
+    Text::from(lines)
+}
+
+struct Help {
+    content: Text<'static>,
+    visible: bool,
+    vs_state: ScrollbarState,
+    vs: u16,
+}
+
+impl Help {
+    fn handle_key(&mut self, k: KeyCode) {
+        match k {
+            KeyCode::Char('q') | KeyCode::Char('?') => {
+                self.visible = false;
+            }
+            KeyCode::Up => {
+                self.vs = self.vs.saturating_sub(1);
+                self.vs_state = self.vs_state.position(self.vs as usize);
+            }
+            KeyCode::Down => {
+                self.vs = self.vs.saturating_add(1);
+                self.vs_state = self.vs_state.position(self.vs as usize);
+            }
+
+            _ => {}
         }
     }
 }
 
-#[derive(Default)]
-struct Help {}
+impl Default for Help {
+    fn default() -> Self {
+        let help = help();
+        let h = help.height();
+        Self {
+            content: help,
+            visible: false,
+            vs_state: ScrollbarState::default().content_length(h),
+            vs: 0,
+        }
+    }
+}
 
-impl Widget for Help {
+impl Widget for &mut Help {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        if !self.visible {
+            return;
+        }
         let vertical = Layout::vertical([Constraint::Percentage(50)]).flex(Flex::Center);
         let horizontal = Layout::horizontal([Constraint::Percentage(50)]).flex(Flex::Center);
         let [area] = vertical.areas(area);
         let [area] = horizontal.areas(area);
         Clear.render(area, buf);
 
-        Paragraph::new(help())
-            .block(Block::bordered().title(" Help").bg(Color::Black))
+        Paragraph::new(self.content.clone())
+            .block(
+                Block::bordered()
+                    .title("<Press Esc to close>")
+                    .bg(Color::Black),
+            )
             .wrap(Wrap { trim: false })
-            .alignment(Alignment::Center)
+            .alignment(Alignment::Left)
+            .scroll((self.vs, 0))
             .render(area, buf);
+        Scrollbar::new(ScrollbarOrientation::VerticalRight).render(area, buf, &mut self.vs_state);
     }
 }
 
@@ -550,7 +664,7 @@ mod test {
         Ok(())
     }
 
-    fn render(app: App) -> anyhow::Result<String> {
+    fn render(mut app: App) -> anyhow::Result<String> {
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 6));
         app.render(buf.area, &mut buf);
 
