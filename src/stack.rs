@@ -297,7 +297,7 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
             //     int_value . 10^-scale
             let [a, b] = s.prep_and_pop(|stack: &[BigDecimal; 2]| {
                 let [a, b] = stack;
-                if !(b.is_integer() && b > &BigDecimal::zero() && b < &u64::MAX.into()) {
+                if !(b.is_integer() && b > &BigDecimal::zero() && b < &BigDecimal::from(u64::MAX)) {
                     return Err(StackError::InvalidArgument(
                         "element 1 must be a positive integer".into(),
                     ));
@@ -335,7 +335,7 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
         Op::Precision => {
             let [a] = s.check_and_pop(|stack: &[BigDecimal; 1]| {
                 if stack[0] <= BigDecimal::zero()
-                    || stack[0] > i64::MAX.into()
+                    || stack[0] > BigDecimal::from(i64::MAX)
                     || !stack[0].is_integer()
                 {
                     Err(StackError::InvalidArgument(
