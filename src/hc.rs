@@ -16,13 +16,12 @@ use ratatui::{
 };
 use std::{cmp::min, collections::HashMap, str::FromStr};
 use thiserror::Error;
-use tui_textarea::TextArea;
+use tui_input::{backend::crossterm::EventHandler, Input};
 
 /// Overall state of the app.
-pub struct App<'a> {
+pub struct App {
     exit: bool,                      // If true, exit.
-    valid: bool,                     // Whether the textarea contains a valid number.
-    textarea: TextArea<'a>,          // The input textarea.
+    input: Input,                    // The input widget.
     stack: Stack,                    // The stack of big numbers.
     help: Help,                      // The help widget and its display state.
     separator: bool,                 // If true, show decimal separator.
@@ -39,12 +38,11 @@ enum AppError {
     StackError(StackError),
 }
 
-impl App<'_> {
+impl App {
     pub fn new(state: State) -> anyhow::Result<Self> {
         Ok(App {
             exit: false,
-            valid: true,
-            textarea: TextArea::default(),
+            input: Input::default(),
             stack: state.try_into()?,
             help: Help::default(),
             separator: false,
@@ -70,10 +68,11 @@ impl App<'_> {
 
     /// The app's main loop.
     pub fn run(&mut self, term: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
-        self.update_valid();
         while !self.exit {
             term.draw(|frame| {
-                frame.render_widget(&mut *self, frame.area());
+                if let Some(cursor) = self.render_all(frame.area(), frame.buffer_mut()) {
+                    frame.set_cursor_position(cursor);
+                }
             })?;
             self.handle_events()?;
         }
@@ -102,7 +101,7 @@ impl App<'_> {
                 // Edit the top entry if there is one and the editor is empty.
                 if self.input_is_empty() {
                     if let Some(n) = self.stack.edit_top() {
-                        self.textarea = TextArea::from([n.to_plain_string()]);
+                        self.input = self.input.clone().with_value(n.to_plain_string());
                     }
                 }
             }
@@ -120,10 +119,10 @@ impl App<'_> {
             }
             KeyCode::Char('-') if !empty => {
                 if let Ok(v) = self.input_value() {
-                    self.textarea = TextArea::from([(-v).to_plain_string()]);
+                    self.input = self.input.clone().with_value((-v).to_plain_string());
                 } else {
-                    let event = KeyEvent::new(k, KeyModifiers::empty());
-                    self.textarea.input(event);
+                    let event = Event::Key(KeyEvent::new(k, KeyModifiers::empty()));
+                    self.input.handle_event(&event);
                 }
             }
             KeyCode::Char(c) if self.ops.contains_key(&c) => {
@@ -135,9 +134,9 @@ impl App<'_> {
                     .apply(self.ops[&c].clone())
                     .map_err(AppError::StackError)?;
             }
-            _ => {
-                let event = KeyEvent::new(k, KeyModifiers::empty());
-                self.textarea.input(event);
+            k => {
+                let event = Event::Key(KeyEvent::new(k, KeyModifiers::empty()));
+                self.input.handle_event(&event);
             }
         }
         Ok(())
@@ -161,25 +160,19 @@ impl App<'_> {
             }
             _ => {}
         };
-        self.update_valid();
         Ok(())
     }
 
-    fn update_valid(&mut self) {
-        self.valid = self.input_is_empty() || self.input_value().is_ok();
-        self.textarea.set_block(
-            Block::bordered()
-                .border_style(if self.valid { Color::White } else { Color::Red })
-                .bg(Color::Black),
-        );
+    fn input_is_valid(&self) -> bool {
+        self.input_is_empty() || self.input_value().is_ok()
     }
 
     fn input_is_empty(&self) -> bool {
-        self.textarea.lines()[0].is_empty()
+        self.input.value().is_empty()
     }
 
     fn input_value(&self) -> Result<BigDecimal, AppError> {
-        let mut s = self.textarea.lines()[0].clone();
+        let mut s = self.input.value().to_owned();
         if s.starts_with("_") {
             s = format!("-{}", &s[1..]);
         }
@@ -194,8 +187,28 @@ impl App<'_> {
         self.stack
             .apply(Op::Push(v))
             .map_err(AppError::StackError)?;
-        self.textarea = TextArea::default();
+        self.input = Input::default();
         Ok(())
+    }
+
+    fn render_input(&self, area: &Rect) -> (Paragraph<'static>, (u16, u16)) {
+        let width = area.width.max(3) - 3;
+        let scroll = self.input.visual_scroll(width as usize);
+
+        let input = Paragraph::new(self.input.value().to_owned())
+            .block(
+                Block::bordered()
+                    .border_style(if self.input_is_valid() {
+                        Color::White
+                    } else {
+                        Color::Red
+                    })
+                    .bg(Color::Black),
+            )
+            .scroll((0, scroll as u16));
+        let x = self.input.visual_cursor().max(scroll) - scroll + 1;
+
+        (input, (area.x + x as u16, area.y + 1))
     }
 
     fn render_instructions(&self) -> impl Widget {
@@ -273,10 +286,7 @@ impl App<'_> {
         };
         Text::from(status).bg(Color::Black)
     }
-}
-
-impl Widget for &mut App<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render_all(&mut self, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         let [page] = Layout::horizontal([Constraint::Length(50)])
             .flex(Flex::Center)
             .areas(area);
@@ -290,9 +300,12 @@ impl Widget for &mut App<'_> {
 
         self.render_instructions().render(instructions_area, buf);
         self.render_stack(&stack_area).render(stack_area, buf);
-        self.textarea.render(input_area, buf);
+        let (w, cursor) = self.render_input(&input_area);
+        w.render(input_area, buf);
         self.render_status().render(status_area, buf);
         self.help.render(area, buf);
+
+        Some(cursor)
     }
 }
 
@@ -666,7 +679,7 @@ mod test {
 
     fn render(mut app: App) -> anyhow::Result<String> {
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 6));
-        app.render(buf.area, &mut buf);
+        app.render_all(buf.area, &mut buf);
 
         let mut line = String::with_capacity(buf.area.width as usize);
         for x in 0..buf.area.width {
