@@ -405,7 +405,6 @@ struct Help {
     content: Text<'static>,
     visible: bool,
     vs_state: ScrollbarState,
-    vs: u16,
 }
 
 impl Help {
@@ -415,12 +414,10 @@ impl Help {
                 self.visible = false;
             }
             KeyCode::Up => {
-                self.vs = self.vs.saturating_sub(1);
-                self.vs_state = self.vs_state.position(self.vs as usize);
+                self.vs_state.prev();
             }
             KeyCode::Down => {
-                self.vs = self.vs.saturating_add(1);
-                self.vs_state = self.vs_state.position(self.vs as usize);
+                self.vs_state.next();
             }
 
             _ => {}
@@ -436,7 +433,6 @@ impl Default for Help {
             content: help,
             visible: false,
             vs_state: ScrollbarState::default().content_length(h),
-            vs: 0,
         }
     }
 }
@@ -460,7 +456,7 @@ impl Widget for &mut Help {
             )
             .wrap(Wrap { trim: false })
             .alignment(Alignment::Left)
-            .scroll((self.vs, 0))
+            .scroll((self.vs_state.get_position() as u16, 0))
             .render(area, buf);
         Scrollbar::new(ScrollbarOrientation::VerticalRight).render(area, buf, &mut self.vs_state);
     }
