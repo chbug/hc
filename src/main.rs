@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::Parser;
 
 mod hc;
+mod help;
 mod stack;
 mod state;
 

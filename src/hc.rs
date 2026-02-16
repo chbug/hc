@@ -1,4 +1,5 @@
 use crate::{
+    help::{Help, HelpState},
     stack::{Op, Stack, StackError},
     state::State,
 };
@@ -6,13 +7,10 @@ use bigdecimal::{BigDecimal, Zero};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Stylize},
     text::{Line, Span, Text},
-    widgets::{
-        Block, Cell, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
-        StatefulWidget, Table, Widget, Wrap,
-    },
+    widgets::{Block, Cell, Paragraph, Row, StatefulWidget, Table, Widget},
 };
 use std::{cmp::min, collections::HashMap, str::FromStr};
 use thiserror::Error;
@@ -23,7 +21,7 @@ pub struct App {
     exit: bool,                      // If true, exit.
     input: Input,                    // The input widget.
     stack: Stack,                    // The stack of big numbers.
-    help: Help,                      // The help widget and its display state.
+    help: HelpState,                 // The help widget and its display state.
     separator: bool,                 // If true, show decimal separator.
     ops: HashMap<char, Op>,          // The known operations on the stack.
     op: Option<char>,                // The latest operation.
@@ -44,7 +42,7 @@ impl App {
             exit: false,
             input: Input::default(),
             stack: state.try_into()?,
-            help: Help::default(),
+            help: HelpState::default(),
             separator: false,
             ops: HashMap::from([
                 ('+', Op::Add),
@@ -91,7 +89,7 @@ impl App {
     }
 
     fn handle_key(&mut self, k: KeyCode) -> Result<(), AppError> {
-        if self.help.visible {
+        if self.help.is_visible() {
             self.help.handle_key(k);
             return Ok(());
         }
@@ -106,7 +104,7 @@ impl App {
                 }
             }
             KeyCode::Char('?') => {
-                self.help.visible = true;
+                self.help.set_visible(true);
             }
             KeyCode::Char('q') => {
                 self.exit = true;
@@ -303,162 +301,9 @@ impl App {
         let (w, cursor) = self.render_input(&input_area);
         w.render(input_area, buf);
         self.render_status().render(status_area, buf);
-        self.help.render(area, buf);
+        Help::default().render(area, buf, &mut self.help);
 
         Some(cursor)
-    }
-}
-
-fn help() -> Text<'static> {
-    let lines: Vec<Line> = vec![
-        Line::from("Helix Calc is a Reverse Polish Notation calculator."),
-        Line::from(""),
-        Line::from("Operators manipulate the stack of values [S1, S2, ...]:"),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("  "),
-            "+ - * /".blue(),
-            Span::raw(" : perform the arithmetic operation on S2 and S1"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "%".blue(),
-            Span::raw(" : compute the modulo of S2 divided by S1"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "^".blue(),
-            Span::raw(" : raise S2 to the power of S1"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "P".blue(),
-            Span::raw(" : pop S1 off the stack"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "d".blue(),
-            Span::raw(" : duplicate S1"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "v".blue(),
-            Span::raw(" : compute the square root of S1"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "k".blue(),
-            Span::raw(" : pop S1 and use it to set the precision"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "r".blue(),
-            Span::raw(" : swap S1 and S2"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "u".blue(),
-            Span::raw(" : undo the last operation"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "U".blue(),
-            Span::raw(" : redo the last undone operation"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "'".blue(),
-            Span::raw(" : toggle the decimal separator"),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            "[Up]".blue(),
-            Span::raw(" : edit S1"),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("Negative numbers can be entered as "),
-            "_123".blue(),
-            Span::raw(" or as "),
-            "123-".blue(),
-            Span::raw(" (no space between the digits and the sign)."),
-        ]),
-        Line::from(""),
-        Line::from("Helix Calc supports numbers of arbitrary length, and uses ~ to indicate when a number is truncated."),
-        Line::from("For instance, 1e100 will be represented as:"),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("10000000000000000000"),
-            "~101~".yellow(),
-            Span::raw("0000000000000000000"),
-        ]),
-        Line::from(""),
-        Line::from("Check out the code and report bugs at:"),
-        Line::from("   https://github.com/chbug/hc"),
-        Line::from(""),
-        Line::from("The name is inspired by Helix Editor, and the functionality by the venerable GNU dc."),
-    ];
-    Text::from(lines)
-}
-
-struct Help {
-    content: Text<'static>,
-    visible: bool,
-    vs_state: ScrollbarState,
-}
-
-impl Help {
-    fn handle_key(&mut self, k: KeyCode) {
-        match k {
-            KeyCode::Char('q') | KeyCode::Char('?') => {
-                self.visible = false;
-            }
-            KeyCode::Up => {
-                self.vs_state.prev();
-            }
-            KeyCode::Down => {
-                self.vs_state.next();
-            }
-
-            _ => {}
-        }
-    }
-}
-
-impl Default for Help {
-    fn default() -> Self {
-        let help = help();
-        let h = help.height();
-        Self {
-            content: help,
-            visible: false,
-            vs_state: ScrollbarState::default().content_length(h),
-        }
-    }
-}
-
-impl Widget for &mut Help {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        if !self.visible {
-            return;
-        }
-        let vertical = Layout::vertical([Constraint::Percentage(50)]).flex(Flex::Center);
-        let horizontal = Layout::horizontal([Constraint::Percentage(50)]).flex(Flex::Center);
-        let [area] = vertical.areas(area);
-        let [area] = horizontal.areas(area);
-        Clear.render(area, buf);
-
-        Paragraph::new(self.content.clone())
-            .block(
-                Block::bordered()
-                    .title("<Press Esc to close>")
-                    .bg(Color::Black),
-            )
-            .wrap(Wrap { trim: false })
-            .alignment(Alignment::Left)
-            .scroll((self.vs_state.get_position() as u16, 0))
-            .render(area, buf);
-        Scrollbar::new(ScrollbarOrientation::VerticalRight).render(area, buf, &mut self.vs_state);
     }
 }
 
