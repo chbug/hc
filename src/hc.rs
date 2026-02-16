@@ -308,10 +308,10 @@ impl App {
 }
 
 fn add_separators(repr: &str) -> String {
-    let (sign, rest) = if repr.starts_with('-') {
-        ("-", &repr[1..])
+    let (sign, rest) = if let Some(number) = repr.strip_prefix('-') {
+        ("-", number)
     } else {
-        ("", &repr[..])
+        ("", repr)
     };
     let (digits, rest) = if let Some(idx) = rest.find('.') {
         (&rest[..idx], &rest[idx..])

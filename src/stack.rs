@@ -47,7 +47,7 @@ where
             return false;
         }
         self.current -= 1;
-        return true;
+        true
     }
 
     /// Redo to the next state if there is one, returns false if not.
@@ -56,7 +56,7 @@ where
             return false;
         }
         self.current += 1;
-        return true;
+        true
     }
 
     pub fn cur(&self) -> &T {
@@ -334,10 +334,7 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
         }
         Op::Precision => {
             let [a] = s.check_and_pop(|stack: &[BigDecimal; 1]| {
-                if stack[0] <= BigDecimal::zero()
-                    || stack[0] > BigDecimal::from(i64::MAX)
-                    || !stack[0].is_integer()
-                {
+                if stack[0] <= BigDecimal::zero() || stack[0] > i64::MAX || !stack[0].is_integer() {
                     Err(StackError::InvalidArgument(
                         "element 1 must be a positive integer".into(),
                     ))
