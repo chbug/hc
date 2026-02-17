@@ -3,6 +3,7 @@ use clap::Parser;
 
 mod hc;
 mod help;
+mod input;
 mod stack;
 mod state;
 

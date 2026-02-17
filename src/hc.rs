@@ -1,3 +1,4 @@
+use crate::input::{InputError, InputState, InputWidget};
 use crate::{
     help::{Help, HelpState},
     stack::{Op, Stack, StackError},
@@ -10,16 +11,15 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Cell, Paragraph, Row, StatefulWidget, Table, Widget},
+    widgets::{Cell, Row, StatefulWidget, Table, Widget},
 };
-use std::{cmp::min, collections::HashMap, str::FromStr};
+use std::{cmp::min, collections::HashMap};
 use thiserror::Error;
-use tui_input::{backend::crossterm::EventHandler, Input};
 
 /// Overall state of the app.
 pub struct App {
     exit: bool,                      // If true, exit.
-    input: Input,                    // The input widget.
+    input: InputState,               // The input widget.
     stack: Stack,                    // The stack of big numbers.
     help: HelpState,                 // The help widget and its display state.
     separator: bool,                 // If true, show decimal separator.
@@ -30,17 +30,17 @@ pub struct App {
 
 #[derive(Error, Debug, PartialEq)]
 enum AppError {
-    #[error("Input is invalid")]
-    InputError,
     #[error("{0}")]
-    StackError(StackError),
+    InputError(#[from] InputError),
+    #[error("{0}")]
+    StackError(#[from] StackError),
 }
 
 impl App {
     pub fn new(state: State) -> anyhow::Result<Self> {
         Ok(App {
             exit: false,
-            input: Input::default(),
+            input: InputState::default(),
             stack: state.try_into()?,
             help: HelpState::default(),
             separator: false,
@@ -93,11 +93,11 @@ impl App {
             self.help.handle_key(k);
             return Ok(());
         }
-        let empty = self.input_is_empty();
+        let empty = self.input.is_empty();
         match k {
             KeyCode::Up => {
                 // Edit the top entry if there is one and the editor is empty.
-                if self.input_is_empty() {
+                if self.input.is_empty() {
                     if let Some(n) = self.stack.edit_top() {
                         self.input = self.input.clone().with_value(n.to_plain_string());
                     }
@@ -116,7 +116,7 @@ impl App {
                 self.input_consume()?;
             }
             KeyCode::Char('-') if !empty => {
-                if let Ok(v) = self.input_value() {
+                if let Ok(v) = self.input.value() {
                     self.input = self.input.clone().with_value((-v).to_plain_string());
                 } else {
                     let event = Event::Key(KeyEvent::new(k, KeyModifiers::empty()));
@@ -161,52 +161,16 @@ impl App {
         Ok(())
     }
 
-    fn input_is_valid(&self) -> bool {
-        self.input_is_empty() || self.input_value().is_ok()
-    }
-
-    fn input_is_empty(&self) -> bool {
-        self.input.value().is_empty()
-    }
-
-    fn input_value(&self) -> Result<BigDecimal, AppError> {
-        let mut s = self.input.value().to_owned();
-        if s.starts_with("_") {
-            s = format!("-{}", &s[1..]);
-        }
-        BigDecimal::from_str(&s).map_err(|_| AppError::InputError)
-    }
-
     fn input_consume(&mut self) -> Result<(), AppError> {
-        if self.input_is_empty() {
+        if self.input.is_empty() {
             return Ok(());
         }
-        let v = self.input_value()?;
+        let v = self.input.value()?;
         self.stack
             .apply(Op::Push(v))
             .map_err(AppError::StackError)?;
-        self.input = Input::default();
+        self.input.reset();
         Ok(())
-    }
-
-    fn render_input(&self, area: &Rect) -> (Paragraph<'static>, (u16, u16)) {
-        let width = area.width.max(3) - 3;
-        let scroll = self.input.visual_scroll(width as usize);
-
-        let input = Paragraph::new(self.input.value().to_owned())
-            .block(
-                Block::bordered()
-                    .border_style(if self.input_is_valid() {
-                        Color::White
-                    } else {
-                        Color::Red
-                    })
-                    .bg(Color::Black),
-            )
-            .scroll((0, scroll as u16));
-        let x = self.input.visual_cursor().max(scroll) - scroll + 1;
-
-        (input, (area.x + x as u16, area.y + 1))
     }
 
     fn render_instructions(&self) -> impl Widget {
@@ -257,7 +221,7 @@ impl App {
     fn render_status(&self) -> impl Widget {
         let status = match &self.op_status {
             Ok(_) => {
-                if self.input_is_empty() {
+                if self.input.is_empty() {
                     if let Some(c) = self.op {
                         Line::from(format!("<{}>", c).blue().bold())
                     } else {
@@ -265,7 +229,7 @@ impl App {
                             .blue()
                             .into_right_aligned_line()
                     }
-                } else if self.input_value().is_ok() {
+                } else if self.input.is_valid() {
                     Line::from(vec!["<Enter>".bold().blue(), " to add to the stack".into()])
                 } else {
                     Line::from("Input is not a valid number")
@@ -284,6 +248,7 @@ impl App {
         };
         Text::from(status).bg(Color::Black)
     }
+
     fn render_all(&mut self, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         let [page] = Layout::horizontal([Constraint::Length(50)])
             .flex(Flex::Center)
@@ -298,12 +263,11 @@ impl App {
 
         self.render_instructions().render(instructions_area, buf);
         self.render_stack(&stack_area).render(stack_area, buf);
-        let (w, cursor) = self.render_input(&input_area);
-        w.render(input_area, buf);
+        InputWidget::default().render(input_area, buf, &mut self.input);
         self.render_status().render(status_area, buf);
         Help::default().render(area, buf, &mut self.help);
 
-        Some(cursor)
+        Some(self.input.cursor())
     }
 }
 
