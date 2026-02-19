@@ -83,19 +83,19 @@ impl App {
 
     pub fn add_extra<S: AsRef<str>>(&mut self, extra: S) -> anyhow::Result<()> {
         for c in extra.as_ref().chars() {
-            self.handle_key(KeyCode::Char(c))?;
+            self.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))?;
         }
         Ok(())
     }
 
-    fn handle_key(&mut self, k: KeyCode) -> Result<(), AppError> {
+    fn handle_key(&mut self, k: KeyEvent) -> Result<(), AppError> {
         if self.help.is_visible() {
             self.help.handle_key(k);
             return Ok(());
         }
         let empty = self.input.is_empty();
-        match k {
-            KeyCode::Up => {
+        match (k.code, k.modifiers) {
+            (KeyCode::Up, KeyModifiers::NONE) => {
                 // Edit the top entry if there is one and the editor is empty.
                 if self.input.is_empty() {
                     if let Some(n) = self.stack.edit_top() {
@@ -103,27 +103,29 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('?') => {
+            (KeyCode::Char('?'), KeyModifiers::NONE) => {
                 self.help.set_visible(true);
             }
-            KeyCode::Char('q') => {
+            (KeyCode::Char('q'), KeyModifiers::NONE) | (KeyCode::Esc, KeyModifiers::NONE) => {
                 self.exit = true;
             }
-            KeyCode::Char('\'') => {
+            (KeyCode::Char('\''), KeyModifiers::NONE) => {
                 self.separator = !self.separator;
             }
-            KeyCode::Enter | KeyCode::Char(' ') => {
+            (KeyCode::Enter, KeyModifiers::NONE)
+            | (KeyCode::Char(' '), KeyModifiers::NONE)
+            | (KeyCode::Char('m'), KeyModifiers::CONTROL) => {
                 self.input_consume()?;
             }
-            KeyCode::Char('-') if !empty => {
+            (KeyCode::Char('-'), KeyModifiers::NONE) if !empty => {
                 if let Ok(v) = self.input.value() {
                     self.input = self.input.clone().with_value((-v).to_plain_string());
                 } else {
-                    let event = Event::Key(KeyEvent::new(k, KeyModifiers::empty()));
+                    let event = Event::Key(k);
                     self.input.handle_event(&event);
                 }
             }
-            KeyCode::Char(c) if self.ops.contains_key(&c) => {
+            (KeyCode::Char(c), KeyModifiers::NONE) if self.ops.contains_key(&c) => {
                 if !empty {
                     self.input_consume()?;
                 }
@@ -132,8 +134,8 @@ impl App {
                     .apply(self.ops[&c].clone())
                     .map_err(AppError::StackError)?;
             }
-            k => {
-                let event = Event::Key(KeyEvent::new(k, KeyModifiers::empty()));
+            _ => {
+                let event = Event::Key(k);
                 self.input.handle_event(&event);
             }
         }
@@ -144,17 +146,7 @@ impl App {
         match crossterm::event::read()? {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 self.op = None;
-                self.op_status = Ok(());
-                // Perform a few translations between what's allowed interactively and
-                // what's only done from the command-line.
-                let keycode = match key_event.code {
-                    KeyCode::Char('m') if key_event.modifiers == KeyModifiers::CONTROL => {
-                        KeyCode::Enter
-                    }
-                    KeyCode::Esc => KeyCode::Char('q'),
-                    c => c,
-                };
-                self.op_status = self.handle_key(keycode);
+                self.op_status = self.handle_key(key_event);
             }
             _ => {}
         };

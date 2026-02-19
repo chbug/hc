@@ -1,5 +1,5 @@
 //! Help popup implementation.
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Flex, Layout, Rect},
@@ -23,15 +23,17 @@ pub struct HelpState {
 }
 
 impl HelpState {
-    pub fn handle_key(&mut self, k: KeyCode) {
-        match k {
-            KeyCode::Char('q') | KeyCode::Char('?') => {
+    pub fn handle_key(&mut self, k: KeyEvent) {
+        match (k.code, k.modifiers) {
+            (KeyCode::Char('q'), KeyModifiers::NONE)
+            | (KeyCode::Char('?'), KeyModifiers::NONE)
+            | (KeyCode::Esc, KeyModifiers::NONE) => {
                 self.visible = false;
             }
-            KeyCode::Up => {
+            (KeyCode::Up, KeyModifiers::NONE) => {
                 self.vs_state.prev();
             }
-            KeyCode::Down => {
+            (KeyCode::Down, KeyModifiers::NONE) => {
                 self.vs_state.next();
             }
 
