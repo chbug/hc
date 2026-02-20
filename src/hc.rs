@@ -144,8 +144,15 @@ impl App {
 
     fn handle_events(&mut self) -> std::io::Result<()> {
         match crossterm::event::read()? {
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+            Event::Key(mut key_event) if key_event.kind == KeyEventKind::Press => {
                 self.op = None;
+                // crossterm is doing very inconsistent things with SHIFT between
+                // letters and non-letters, for instance Shift-/ is '?' but is
+                // reported Char('?') + SHIFT.
+                //
+                // As we don't really _care_ about SHIFT as a modifier, let's
+                // filter it out altogether here.
+                key_event.modifiers = key_event.modifiers.difference(KeyModifiers::SHIFT);
                 self.op_status = self.handle_key(key_event);
             }
             _ => {}
