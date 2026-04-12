@@ -1,6 +1,7 @@
 use anyhow::Context;
 use clap::Parser;
 
+mod format;
 mod hc;
 mod help;
 mod input;

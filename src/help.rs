@@ -94,6 +94,11 @@ fn help() -> Text<'static> {
         ]),
         Line::from(vec![
             Span::raw("  "),
+            "o".blue(),
+            Span::raw(" : pop S1 and use it to set the output base (2–36, default 10)"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
             "r".blue(),
             Span::raw(" : swap S1 and S2"),
         ]),

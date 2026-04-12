@@ -1,19 +1,19 @@
+use crate::format::format_number;
 use crate::input::{InputError, InputState, InputWidget};
 use crate::{
     help::{Help, HelpState},
     stack::{Op, Stack, StackError},
     state::State,
 };
-use bigdecimal::{BigDecimal, Zero};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Stylize},
-    text::{Line, Span, Text},
+    text::{Line, Text},
     widgets::{Cell, Row, StatefulWidget, Table, Widget},
 };
-use std::{cmp::min, collections::HashMap};
+use std::collections::HashMap;
 use thiserror::Error;
 
 /// Overall state of the app.
@@ -55,6 +55,7 @@ impl App {
                 ('d', Op::Duplicate),
                 ('P', Op::Pop),
                 ('k', Op::Precision),
+                ('o', Op::OutputBase),
                 ('r', Op::Rotate),
                 ('u', Op::Undo),
                 ('U', Op::Redo),
@@ -187,6 +188,7 @@ impl App {
     fn render_stack(&self, area: &Rect) -> impl Widget {
         let margin = 5; // Size of the margin holding the stack index.
         let snapshot = self.stack.snapshot();
+        let base = self.stack.output_base();
         let stack: Vec<Row<'_>> = (1..=area.height)
             .rev()
             .map(|index| {
@@ -197,6 +199,7 @@ impl App {
                             &snapshot[stack_index],
                             (area.width - (margin + 1)) as u64,
                             self.separator,
+                            base,
                         ),
                         Line::raw(format!("{}", index)).style(Color::White),
                     ]
@@ -218,242 +221,58 @@ impl App {
     }
 
     fn render_status(&self) -> impl Widget {
-        let status = match &self.op_status {
-            Ok(_) => {
-                if self.input.is_empty() {
-                    if let Some(c) = self.op {
-                        Line::from(format!("<{}>", c).blue().bold())
-                    } else {
-                        format!("Precision: {}", self.stack.precision())
-                            .blue()
-                            .into_right_aligned_line()
-                    }
-                } else if self.input.is_valid() {
-                    Line::from(vec!["<Enter>".bold().blue(), " to add to the stack".into()])
-                } else {
-                    Line::from("Input is not a valid number")
-                }
-            }
-            Err(err) => {
-                if let Some(c) = self.op {
-                    Line::from(vec![
-                        format!("<{}>", c).blue().bold(),
-                        format!(": {}", err).into(),
-                    ])
-                } else {
-                    Line::from(err.to_string())
-                }
-            }
+        let status = match (&self.op_status, self.op) {
+            (Ok(_), Some(c)) => Line::from(format!("<{}>", c).blue().bold()),
+            (Err(err), Some(c)) => Line::from(vec![
+                format!("<{}>", c).blue().bold(),
+                format!(": {}", err).into(),
+            ]),
+            (Err(err), None) => Line::from(err.to_string()),
+            (Ok(_), None) => Line::raw(""),
         };
         Text::from(status).bg(Color::Black)
+    }
+
+    fn render_precision_base(&self) -> impl Widget {
+        let base = self.stack.output_base();
+        let sep = if self.separator { "on " } else { "off" };
+        let label = format!(
+            "Precision: {} | Base: {} | Separator: {}",
+            self.stack.precision(),
+            base,
+            sep
+        );
+        Text::from(label.green().into_centered_line()).bg(Color::Black)
     }
 
     fn render_all(&mut self, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         let [page] = Layout::horizontal([Constraint::Length(50)])
             .flex(Flex::Center)
             .areas(area);
-        let [instructions_area, stack_area, input_area, status_area] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Percentage(100),
-            Constraint::Length(3),
-            Constraint::Length(1),
-        ])
-        .areas(page);
+        let [instructions_area, stack_area, input_area, status_op_area, status_info_area] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Percentage(100),
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .areas(page);
 
         self.render_instructions().render(instructions_area, buf);
         self.render_stack(&stack_area).render(stack_area, buf);
         InputWidget::default().render(input_area, buf, &mut self.input);
-        self.render_status().render(status_area, buf);
+        self.render_status().render(status_op_area, buf);
+        self.render_precision_base().render(status_info_area, buf);
         Help::default().render(area, buf, &mut self.help);
 
         Some(self.input.cursor())
     }
 }
 
-fn add_separators(repr: &str) -> String {
-    let (sign, rest) = if let Some(number) = repr.strip_prefix('-') {
-        ("-", number)
-    } else {
-        ("", repr)
-    };
-    let (digits, rest) = if let Some(idx) = rest.find('.') {
-        (&rest[..idx], &rest[idx..])
-    } else {
-        (rest, "")
-    };
-    let mut result = String::new();
-    let len = digits.len();
-    for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
-            result.push(' ');
-        }
-        result.push(ch);
-    }
-    format!("{}{}{}", sign, result, rest)
-}
-
-fn format_number<'b>(n: &BigDecimal, width: u64, separator: bool) -> Line<'b> {
-    let repr = n.normalized().to_plain_string();
-    let total = repr.len() as u64;
-    // Trivial case: the representation already fits the display.
-    if total <= width {
-        if !separator {
-            return Line::raw(repr);
-        }
-        let separated_repr = add_separators(&repr);
-        // It's probably still better to remove the separators than to switch to
-        // extended representation if the size is a bit tight.
-        if separated_repr.len() as u64 <= width {
-            return Line::raw(separated_repr);
-        }
-        return Line::raw(repr);
-    }
-    // Simple case: we can truncate after the decimal place as we retain
-    // the most important information. We still want to indicate truncation
-    // though, as this is all with fixed precision.
-    let digits_after_dot = if let Some(idx) = repr.find('.') {
-        (total - idx as u64 - 1) as i64
-    } else {
-        0
-    };
-    let digits_to_dot = total as i64 - digits_after_dot;
-    let digits_before_dot = digits_to_dot - if digits_after_dot > 0 { 1 } else { 0 };
-    // Check that we can display the final ~ if we need to truncate.
-    let extra_precision = width as i64 - digits_to_dot - 1;
-    if digits_after_dot > 0 && extra_precision >= 0 {
-        let result = vec![
-            Span::from(String::from(
-                &repr[..(digits_to_dot + extra_precision) as usize],
-            )),
-            Span::from(String::from("~")).yellow(),
-        ];
-        return Line::from(result);
-    }
-
-    // More complex case: we want to keep both magnitude information and
-    // details about the number.
-    //
-    // We want to spend our "width budget" on a mix of areas
-    // of the string, as we don't know what the user cares about.
-    // An alternative would be scientific notation, but I'd rather
-    // we introduce "display modes" for those.
-    //
-    // [SGN][MSB][~<POW>~][LSB].[RES]
-    let abs_start = if n < &BigDecimal::zero() { 1 } else { 0 };
-
-    let mut budget = width as i64; // remaining space to allocate.
-    let mut parts = 2; // number of parts to insert from the original representation.
-
-    budget -= abs_start; // We need to insert the sign in the end.
-    if digits_after_dot > 0 {
-        parts += 1; // we need to insert the decimal information.
-        budget -= 1; // we need to insert the dot in the end.
-    }
-    let pow = format!("~{}~", digits_before_dot - abs_start);
-    budget -= pow.len() as i64; // we need to insert the magnitude back.
-    if budget < parts {
-        // Don't have enough space to represent this :(
-        return Line::from(Span::from(String::from("~")).red());
-    }
-    // We can now split the budget in "parts" and allocate the remainder to
-    // [MSB] as it carries most of the information.
-    let msb = (budget / parts + (budget % parts)) as usize;
-    let lsb = (budget / parts) as usize;
-    let result = vec![
-        Span::from(String::from(&repr[..msb + abs_start as usize])),
-        Span::from(String::from(&pow)).yellow(),
-        Span::from(String::from(if digits_after_dot > 0 {
-            &repr[digits_to_dot as usize - lsb - 1
-                ..min(digits_to_dot as usize + lsb, total as usize)]
-        } else {
-            &repr[total as usize - lsb..]
-        })),
-    ];
-    Line::from(result)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[test]
-    fn format_regular_number() {
-        let n: BigDecimal = "12345".parse().unwrap();
-        assert_eq!(format_number(&n, 10, false).to_string(), "12345");
-    }
-
-    #[test]
-    fn format_regular_number_with_separators() {
-        let n: BigDecimal = "12345".parse().unwrap();
-        assert_eq!(format_number(&n, 10, true).to_string(), "12 345");
-    }
-
-    #[test]
-    fn negative_number_with_separators() {
-        let n: BigDecimal = "-12345".parse().unwrap();
-        assert_eq!(format_number(&n, 10, true).to_string(), "-12 345");
-    }
-
-    #[test]
-    fn negative_number_with_separators_and_decimals() {
-        let n: BigDecimal = "-12345.6789".parse().unwrap();
-        assert_eq!(format_number(&n, 15, true).to_string(), "-12 345.6789");
-    }
-
-    #[test]
-    fn drop_separators_under_pressure() {
-        let n: BigDecimal = "123456789".parse().unwrap();
-        assert_eq!(format_number(&n, 10, true).to_string(), "123456789");
-    }
-
-    #[test]
-    fn format_long_number() {
-        let n: BigDecimal = "123456789098".parse().unwrap();
-        assert_eq!(format_number(&n, 10, false).to_string(), "123~12~098");
-        assert_eq!(format_number(&n, 11, false).to_string(), "1234~12~098");
-    }
-
-    #[test]
-    fn format_long_negative_number() {
-        let n: BigDecimal = "-123456789098".parse().unwrap();
-        assert_eq!(format_number(&n, 8, false).to_string(), "-12~12~8");
-        assert_eq!(format_number(&n, 7, false).to_string(), "-1~12~8");
-        // We need at least 7 characters for this...
-        assert_eq!(format_number(&n, 6, false).to_string(), "~");
-    }
-
-    #[test]
-    fn format_long_decimal_number() {
-        let n: BigDecimal = "12345678.34567".parse().unwrap();
-        assert_eq!(format_number(&n, 7, false).to_string(), "1~8~8.3");
-    }
-
-    #[test]
-    fn format_dont_overflow_decimal() {
-        let n: BigDecimal = "12345678909876543.21".parse().unwrap();
-        assert_eq!(format_number(&n, 18, false).to_string(), "12345~17~6543.21");
-    }
-
-    #[test]
-    fn format_long_negative_decimal_number() {
-        let n: BigDecimal = "-12345678.34567".parse().unwrap();
-        assert_eq!(format_number(&n, 8, false).to_string(), "-1~8~8.3");
-    }
-
-    #[test]
-    fn truncate_decimal_part() {
-        let n: BigDecimal = "0.123456789".parse().unwrap();
-        assert_eq!(format_number(&n, 4, false).to_string(), "0.1~");
-        let n: BigDecimal = "10.12345678".parse().unwrap();
-        assert_eq!(format_number(&n, 4, false).to_string(), "10.~");
-    }
-
-    #[test]
-    fn handle_negative_scale() {
-        let n: BigDecimal = "100000000000".parse().unwrap();
-        let n = n.normalized();
-        assert_eq!(format_number(&n, 10, false).to_string(), "100~12~000");
-    }
 
     #[test]
     fn validate_display_of_long_numbers() -> anyhow::Result<()> {
@@ -465,14 +284,6 @@ mod test {
     }
 
     #[test]
-    fn trim_unneeded_zeros() {
-        let n: BigDecimal = "0.000100000".parse().unwrap();
-        assert_eq!(format_number(&n, 10, false).to_string(), "0.0001");
-        let n: BigDecimal = "1e100".parse().unwrap();
-        assert_eq!(format_number(&n, 10, false).to_string(), "100~101~00");
-    }
-
-    #[test]
     fn normalize_scientific_numbers() -> anyhow::Result<()> {
         let mut app = App::new(State::default())?;
         app.add_extra("1e100 ")?;
@@ -481,8 +292,17 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn set_output_base() -> anyhow::Result<()> {
+        let mut app = App::new(State::default())?;
+        app.add_extra("255 16 o")?;
+        // stack shows "ff" right-aligned in the value column, then the index
+        assert_eq!(render(app)?, "            ff     1");
+        Ok(())
+    }
+
     fn render(mut app: App) -> anyhow::Result<String> {
-        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 6));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 7));
         app.render_all(buf.area, &mut buf);
 
         let mut line = String::with_capacity(buf.area.width as usize);

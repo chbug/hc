@@ -72,11 +72,17 @@ pub struct InstantStack {
     pub stack: VecDeque<BigDecimal>,
     // Precision when taking a snapshot (not of internal representation).
     pub precision: u64,
+    // Base for displaying numbers (2-36, default 10).
+    pub output_base: u32,
 }
 
 impl InstantStack {
     pub fn new(stack: VecDeque<BigDecimal>, precision: u64) -> InstantStack {
-        InstantStack { stack, precision }
+        InstantStack {
+            stack,
+            precision,
+            output_base: 10,
+        }
     }
 
     pub fn push_front(&mut self, v: BigDecimal) {
@@ -150,6 +156,7 @@ pub enum Op {
     Duplicate,
     Pop,
     Precision,
+    OutputBase,
     Rotate,
     Undo,
     Redo,
@@ -228,6 +235,11 @@ impl Stack {
     // Return the precision of the display.
     pub fn precision(&self) -> u64 {
         self.stack.cur().precision
+    }
+
+    // Return the current output base.
+    pub fn output_base(&self) -> u32 {
+        self.stack.cur().output_base
     }
 }
 
@@ -343,6 +355,21 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
                 }
             })?;
             s.precision = a.to_u64().unwrap();
+        }
+        Op::OutputBase => {
+            let [a] = s.check_and_pop(|stack: &[BigDecimal; 1]| {
+                if !stack[0].is_integer()
+                    || stack[0] < BigDecimal::from(2)
+                    || stack[0] > BigDecimal::from(36)
+                {
+                    Err(StackError::InvalidArgument(
+                        "base must be an integer between 2 and 36".into(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            })?;
+            s.output_base = a.to_u32().unwrap();
         }
         Op::Rotate => {
             let [a, b] = s.pop()?;
