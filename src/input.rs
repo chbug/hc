@@ -1,3 +1,4 @@
+use bigdecimal::num_bigint::BigInt;
 use bigdecimal::BigDecimal;
 use crossterm::event::Event;
 use ratatui::{
@@ -49,11 +50,22 @@ impl InputState {
         if s.is_empty() {
             return Err(InputError::Empty);
         }
-        let mut s = s.to_owned();
-        if s.starts_with("_") {
-            s = format!("-{}", &s[1..]);
-        }
-        BigDecimal::from_str(&s).map_err(|_| InputError::Invalid)
+        let s = s.to_owned();
+        let (negative, s) = if s.starts_with('_') {
+            (true, &s[1..])
+        } else {
+            (false, s.as_str())
+        };
+        let result = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+            parse_radix_int(hex, 16)
+        } else if let Some(bin) = s.strip_prefix("0b").or_else(|| s.strip_prefix("0B")) {
+            parse_radix_int(bin, 2)
+        } else if let Some(oct) = s.strip_prefix("0o").or_else(|| s.strip_prefix("0O")) {
+            parse_radix_int(oct, 8)
+        } else {
+            BigDecimal::from_str(s).map_err(|_| InputError::Invalid)
+        }?;
+        Ok(if negative { -result } else { result })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -95,6 +107,14 @@ impl StatefulWidget for InputWidget {
     }
 }
 
+fn parse_radix_int(digits: &str, radix: u32) -> Result<BigDecimal, InputError> {
+    if digits.is_empty() {
+        return Err(InputError::Invalid);
+    }
+    let n = BigInt::parse_bytes(digits.as_bytes(), radix).ok_or(InputError::Invalid)?;
+    Ok(BigDecimal::from(n))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,5 +141,39 @@ mod tests {
         let widget = InputState::default().with_value("_123".to_string());
         assert!(widget.is_valid());
         assert_eq!(widget.value(), Ok(BigDecimal::from(-123)));
+    }
+
+    #[test]
+    fn test_hex_prefix() {
+        let widget = InputState::default().with_value("0xff".to_string());
+        assert!(widget.is_valid());
+        assert_eq!(widget.value(), Ok(BigDecimal::from(255)));
+    }
+
+    #[test]
+    fn test_binary_prefix() {
+        let widget = InputState::default().with_value("0b1010".to_string());
+        assert!(widget.is_valid());
+        assert_eq!(widget.value(), Ok(BigDecimal::from(10)));
+    }
+
+    #[test]
+    fn test_octal_prefix() {
+        let widget = InputState::default().with_value("0o17".to_string());
+        assert!(widget.is_valid());
+        assert_eq!(widget.value(), Ok(BigDecimal::from(15)));
+    }
+
+    #[test]
+    fn test_negative_hex() {
+        let widget = InputState::default().with_value("_0xff".to_string());
+        assert!(widget.is_valid());
+        assert_eq!(widget.value(), Ok(BigDecimal::from(-255)));
+    }
+
+    #[test]
+    fn test_incomplete_prefix_is_invalid() {
+        let widget = InputState::default().with_value("0x".to_string());
+        assert!(!widget.is_valid());
     }
 }

@@ -126,10 +126,7 @@ impl App {
                     self.input.handle_event(&event);
                 }
             }
-            (KeyCode::Char(c), KeyModifiers::NONE) if self.ops.contains_key(&c) => {
-                if !empty {
-                    self.input_consume()?;
-                }
+            (KeyCode::Char(c), KeyModifiers::NONE) if self.ops.contains_key(&c) && empty => {
                 self.op = Some(c);
                 self.stack
                     .apply(self.ops[&c].clone())
@@ -298,6 +295,24 @@ mod test {
         app.add_extra("255 16 o")?;
         // stack shows "ff" right-aligned in the value column, then the index
         assert_eq!(render(app)?, "            ff     1");
+        Ok(())
+    }
+
+    #[test]
+    fn octal_prefix_not_consumed_as_op() -> anyhow::Result<()> {
+        let mut app = App::new(State::default())?;
+        app.add_extra("0o17 ")?;
+        // 0o17 == 15 decimal
+        assert_eq!(render(app)?, "            15     1");
+        Ok(())
+    }
+
+    #[test]
+    fn op_requires_empty_input() -> anyhow::Result<()> {
+        // "5+" should NOT push 5 and add; "5 +" should.
+        let mut app = App::new(State::default())?;
+        app.add_extra("3 5 +")?;
+        assert_eq!(render(app)?, "             8     1");
         Ok(())
     }
 
