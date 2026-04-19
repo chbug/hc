@@ -11,10 +11,16 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Stylize},
     text::{Line, Text},
-    widgets::{Cell, Row, StatefulWidget, Table, Widget},
+    widgets::{Block, Cell, Clear, Paragraph, Row, StatefulWidget, Table, Widget},
 };
 use std::collections::HashMap;
 use thiserror::Error;
+
+#[derive(Clone, Copy)]
+enum PendingReg {
+    Load,
+    Save,
+}
 
 /// Overall state of the app.
 pub struct App {
@@ -26,6 +32,7 @@ pub struct App {
     ops: HashMap<char, Op>,          // The known operations on the stack.
     op: Option<char>,                // The latest operation.
     op_status: Result<(), AppError>, // The latest status.
+    pending_reg: Option<PendingReg>, // Waiting for register key after L/S.
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -62,6 +69,7 @@ impl App {
             ]),
             op: None,
             op_status: Ok(()),
+            pending_reg: None,
         })
     }
 
@@ -92,6 +100,22 @@ impl App {
     fn handle_key(&mut self, k: KeyEvent) -> Result<(), AppError> {
         if self.help.is_visible() {
             self.help.handle_key(k);
+            return Ok(());
+        }
+        if let Some(pending) = self.pending_reg {
+            self.pending_reg = None;
+            if let KeyCode::Char(c) = k.code {
+                self.op = Some(match pending {
+                    PendingReg::Load => 'L',
+                    PendingReg::Save => 'S',
+                });
+                self.stack
+                    .apply(match pending {
+                        PendingReg::Load => Op::Load(c),
+                        PendingReg::Save => Op::Save(c),
+                    })
+                    .map_err(AppError::StackError)?;
+            }
             return Ok(());
         }
         let empty = self.input.is_empty();
@@ -131,6 +155,12 @@ impl App {
                 self.stack
                     .apply(self.ops[&c].clone())
                     .map_err(AppError::StackError)?;
+            }
+            (KeyCode::Char('L'), KeyModifiers::NONE) if empty => {
+                self.pending_reg = Some(PendingReg::Load);
+            }
+            (KeyCode::Char('S'), KeyModifiers::NONE) if empty => {
+                self.pending_reg = Some(PendingReg::Save);
             }
             _ => {
                 let event = Event::Key(k);
@@ -179,6 +209,38 @@ impl App {
             "<Q> ".blue().bold(),
         ])
         .centered()
+        .bg(Color::Black)
+    }
+
+    fn render_registers(&self, area: &Rect) -> impl Widget {
+        let margin = 5; // same column layout as the stack
+        let base = self.stack.output_base();
+        // inner width after block borders (1 left + 1 right)
+        let value_width = (area.width as u64).saturating_sub(margin as u64 + 1 + 2);
+        let mut regs: Vec<(char, _)> = self
+            .stack
+            .registers()
+            .iter()
+            .map(|(&k, v)| (k, v.clone()))
+            .collect();
+        regs.sort_by_key(|(k, _)| *k);
+        let rows: Vec<Row<'_>> = regs
+            .into_iter()
+            .map(|(key, val)| {
+                Row::new(vec![
+                    Cell::from(
+                        format_number(&val, value_width, self.separator, base).right_aligned(),
+                    ),
+                    Cell::from(Line::raw(key.to_string()).right_aligned()),
+                ])
+            })
+            .collect();
+        Table::new(
+            rows,
+            [Constraint::Percentage(100), Constraint::Length(margin)],
+        )
+        .column_spacing(1)
+        .block(Block::bordered().title_bottom(" Registers"))
         .bg(Color::Black)
     }
 
@@ -242,6 +304,25 @@ impl App {
         Text::from(label.green().into_centered_line()).bg(Color::Black)
     }
 
+    fn render_reg_prompt(&self, area: Rect, buf: &mut Buffer) {
+        let msg = match self.pending_reg.unwrap() {
+            PendingReg::Load => " Load from register: ",
+            PendingReg::Save => " Save to register: ",
+        };
+        let popup_w = msg.len() as u16 + 2; // +2 for left/right borders
+        let [v_center] = Layout::vertical([Constraint::Length(3)])
+            .flex(Flex::Center)
+            .areas(area);
+        let [popup_area] = Layout::horizontal([Constraint::Length(popup_w)])
+            .flex(Flex::Center)
+            .areas(v_center);
+        Clear.render(popup_area, buf);
+        Paragraph::new(msg)
+            .block(Block::bordered())
+            .bg(Color::Black)
+            .render(popup_area, buf);
+    }
+
     fn render_all(&mut self, area: Rect, buf: &mut Buffer) -> Option<(u16, u16)> {
         let [page] = Layout::horizontal([Constraint::Length(50)])
             .flex(Flex::Center)
@@ -257,12 +338,28 @@ impl App {
             .areas(page);
 
         self.render_instructions().render(instructions_area, buf);
-        self.render_stack(&stack_area).render(stack_area, buf);
+        let num_regs = self.stack.registers().len();
+        let reg_rows = num_regs.min(stack_area.height as usize / 2) as u16;
+        if reg_rows > 0 {
+            let [reg_area, remaining_stack] = Layout::vertical([
+                Constraint::Length(reg_rows + 2), // +2 for block borders
+                Constraint::Percentage(100),
+            ])
+            .areas(stack_area);
+            self.render_registers(&reg_area).render(reg_area, buf);
+            self.render_stack(&remaining_stack)
+                .render(remaining_stack, buf);
+        } else {
+            self.render_stack(&stack_area).render(stack_area, buf);
+        }
         InputWidget::default().render(input_area, buf, &mut self.input);
         self.render_status().render(status_op_area, buf);
         self.render_precision_base().render(status_info_area, buf);
         Help::default().render(area, buf, &mut self.help);
 
+        if self.pending_reg.is_some() {
+            self.render_reg_prompt(area, buf);
+        }
         Some(self.input.cursor())
     }
 }
