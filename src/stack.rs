@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, str::FromStr};
+use std::{collections::{HashMap, VecDeque}, str::FromStr};
 
 use bigdecimal::{num_bigint::BigInt, BigDecimal, ParseBigDecimalError, Pow, ToPrimitive, Zero};
 use thiserror::Error;
@@ -74,6 +74,8 @@ pub struct InstantStack {
     pub precision: u64,
     // Base for displaying numbers (2-36, default 10).
     pub output_base: u32,
+    // Named registers (single-char key).
+    pub registers: HashMap<char, BigDecimal>,
 }
 
 impl InstantStack {
@@ -82,6 +84,7 @@ impl InstantStack {
             stack,
             precision,
             output_base: 10,
+            registers: HashMap::new(),
         }
     }
 
@@ -158,6 +161,8 @@ pub enum Op {
     Precision,
     OutputBase,
     Rotate,
+    Save(char),
+    Load(char),
     Undo,
     Redo,
 }
@@ -376,6 +381,20 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
             s.push_front(b);
             s.push_front(a);
         }
+        Op::Save(reg) => {
+            let [a] = s.pop()?;
+            s.registers.insert(reg, a);
+        }
+        Op::Load(reg) => {
+            match s.registers.get(&reg).cloned() {
+                Some(v) => s.push_front(v),
+                None => {
+                    return Err(StackError::InvalidArgument(format!(
+                        "register '{reg}' is empty"
+                    )))
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -582,6 +601,26 @@ mod stack_tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn save_and_load() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(42.into()))?;
+        s.apply(Op::Save('x'))?;
+        assert!(s.snapshot().is_empty());
+        s.apply(Op::Load('x'))?;
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(42)]);
+        Ok(())
+    }
+
+    #[test]
+    fn load_empty_register() {
+        let mut s = Stack::new();
+        assert_eq!(
+            s.apply(Op::Load('z')),
+            Err(StackError::InvalidArgument("register 'z' is empty".into()))
+        );
     }
 
     #[test]
