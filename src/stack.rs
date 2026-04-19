@@ -167,6 +167,7 @@ pub enum Op {
     Rotate,
     Save(char),
     Load(char),
+    ClearRegisters,
     Undo,
     Redo,
 }
@@ -279,7 +280,7 @@ impl TryFrom<State> for Stack {
 
 fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
     match op {
-        // Undo & Redo are meta-operations.
+        // Undo & Redo are meta-operations handled above.
         Op::Undo | Op::Redo => {}
         Op::Push(v) => {
             s.push_front(v);
@@ -401,6 +402,9 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
         Op::Save(reg) => {
             let [a] = s.pop()?;
             s.registers.insert(reg, a);
+        }
+        Op::ClearRegisters => {
+            s.registers.clear();
         }
         Op::Load(reg) => {
             match s.registers.get(&reg).cloned() {

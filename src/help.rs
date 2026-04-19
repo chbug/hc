@@ -114,6 +114,21 @@ fn help() -> Text<'static> {
         ]),
         Line::from(vec![
             Span::raw("  "),
+            "S".blue(),
+            Span::raw(" : pop S1 and save it to a named register (prompts for a key)"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "L".blue(),
+            Span::raw(" : load a named register onto the stack (prompts for a key)"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "C".blue(),
+            Span::raw(" : clear all registers"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
             "'".blue(),
             Span::raw(" : toggle the decimal separator"),
         ]),

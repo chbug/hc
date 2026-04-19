@@ -66,6 +66,7 @@ impl App {
                 ('r', Op::Rotate),
                 ('u', Op::Undo),
                 ('U', Op::Redo),
+                ('C', Op::ClearRegisters),
             ]),
             op: None,
             op_status: Ok(()),
