@@ -51,8 +51,8 @@ impl InputState {
             return Err(InputError::Empty);
         }
         let s = s.to_owned();
-        let (negative, s) = if s.starts_with('_') {
-            (true, &s[1..])
+        let (negative, s) = if let Some(stripped) = s.strip_prefix('_') {
+            (true, stripped)
         } else {
             (false, s.as_str())
         };

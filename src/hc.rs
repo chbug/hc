@@ -241,7 +241,7 @@ impl App {
             [Constraint::Percentage(100), Constraint::Length(margin)],
         )
         .column_spacing(1)
-        .block(Block::bordered().title_bottom(" Registers"))
+        .block(Block::bordered().title_bottom(" Registers "))
         .bg(Color::Black)
     }
 
@@ -415,14 +415,51 @@ mod test {
     }
 
     fn render(mut app: App) -> anyhow::Result<String> {
-        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 7));
-        app.render_all(buf.area, &mut buf);
+        render_row(&mut app, 7, 1)
+    }
 
-        let mut line = String::with_capacity(buf.area.width as usize);
-        for x in 0..buf.area.width {
-            let c = buf[(x, 1)].symbol();
-            line.push_str(c);
+    // Render into a 20-wide buffer of the given height and return the text at the given row.
+    fn render_row(app: &mut App, height: u16, row: u16) -> anyhow::Result<String> {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 20, height));
+        app.render_all(buf.area, &mut buf);
+        let mut line = String::with_capacity(20);
+        for x in 0..20 {
+            line.push_str(buf[(x, row)].symbol());
         }
         Ok(line)
+    }
+
+    #[test]
+    fn register_box_borders_and_value() -> anyhow::Result<()> {
+        let mut app = App::new(State::default())?;
+        app.add_extra("42 Sx")?;
+        // height=15 → stack_area=9 rows → reg_rows=1 → box at rows 1-3
+        // value col=12, key col=5, spacing=1, borders=2
+        assert_eq!(render_row(&mut app, 15, 1)?, "┌──────────────────┐");
+        assert_eq!(render_row(&mut app, 15, 2)?, "│          42     x│");
+        assert_eq!(render_row(&mut app, 15, 3)?, "└ Registers ───────┘");
+        Ok(())
+    }
+
+    #[test]
+    fn register_box_alphabetical_order() -> anyhow::Result<()> {
+        let mut app = App::new(State::default())?;
+        app.add_extra("2 Sz 1 Sa")?;
+        // 'a' comes before 'z' regardless of insertion order
+        assert_eq!(render_row(&mut app, 15, 2)?, "│           1     a│");
+        assert_eq!(render_row(&mut app, 15, 3)?, "│           2     z│");
+        Ok(())
+    }
+
+    #[test]
+    fn register_box_height_capped_at_half_stack() -> anyhow::Result<()> {
+        // height=9 → stack_area=3 rows → half=1 → at most 1 register row shown
+        // even with 3 registers in 'a','b','c'
+        let mut app = App::new(State::default())?;
+        app.add_extra("1 Sa 2 Sb 3 Sc")?;
+        // Row 1: top border, row 2: only 'a' shown (cap=1), row 3: bottom border
+        assert_eq!(render_row(&mut app, 9, 2)?, "│           1     a│");
+        assert_eq!(render_row(&mut app, 9, 3)?, "└ Registers ───────┘");
+        Ok(())
     }
 }

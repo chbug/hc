@@ -382,8 +382,8 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
         Op::OutputBase => {
             let [a] = s.check_and_pop(|stack: &[BigDecimal; 1]| {
                 if !stack[0].is_integer()
-                    || stack[0] < BigDecimal::from(2)
-                    || stack[0] > BigDecimal::from(36)
+                    || stack[0] < 2
+                    || stack[0] > 36
                 {
                     Err(StackError::InvalidArgument(
                         "base must be an integer between 2 and 36".into(),

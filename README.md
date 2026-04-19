@@ -21,6 +21,9 @@ This is a toy app that fulfills my personal needs, but I'm open to PR :)
 - `r` : swap the first two values.
 - `u` : undo the last operation.
 - `U` : redo the last undone operation.
+- `S` : pop S1 and save it to a named register (prompts for a key)
+- `L` : load a named register onto the stack (prompts for a key)                                     ║
+- `C` : clear all registers                        gs
 - `'` : toggle decimal separator.
 - `[Up]`: edit the value at the top of the stack.
 
