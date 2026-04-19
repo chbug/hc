@@ -22,6 +22,9 @@ enum PendingReg {
     Save,
 }
 
+const LOAD: char = 'l';
+const SAVE: char = 's';
+
 /// Overall state of the app.
 pub struct App {
     exit: bool,                      // If true, exit.
@@ -107,8 +110,8 @@ impl App {
             self.pending_reg = None;
             if let KeyCode::Char(c) = k.code {
                 self.op = Some(match pending {
-                    PendingReg::Load => 'L',
-                    PendingReg::Save => 'S',
+                    PendingReg::Load => LOAD,
+                    PendingReg::Save => SAVE,
                 });
                 self.stack
                     .apply(match pending {
@@ -157,10 +160,10 @@ impl App {
                     .apply(self.ops[&c].clone())
                     .map_err(AppError::StackError)?;
             }
-            (KeyCode::Char('L'), KeyModifiers::NONE) if empty => {
+            (KeyCode::Char(LOAD), KeyModifiers::NONE) if empty => {
                 self.pending_reg = Some(PendingReg::Load);
             }
-            (KeyCode::Char('S'), KeyModifiers::NONE) if empty => {
+            (KeyCode::Char(SAVE), KeyModifiers::NONE) if empty => {
                 self.pending_reg = Some(PendingReg::Save);
             }
             _ => {
@@ -432,7 +435,7 @@ mod test {
     #[test]
     fn register_box_borders_and_value() -> anyhow::Result<()> {
         let mut app = App::new(State::default())?;
-        app.add_extra("42 Sx")?;
+        app.add_extra("42 sx")?;
         // height=15 → stack_area=9 rows → reg_rows=1 → box at rows 1-3
         // value col=12, key col=5, spacing=1, borders=2
         assert_eq!(render_row(&mut app, 15, 1)?, "┌──────────────────┐");
@@ -444,7 +447,7 @@ mod test {
     #[test]
     fn register_box_alphabetical_order() -> anyhow::Result<()> {
         let mut app = App::new(State::default())?;
-        app.add_extra("2 Sz 1 Sa")?;
+        app.add_extra("2 sz 1 sa")?;
         // 'a' comes before 'z' regardless of insertion order
         assert_eq!(render_row(&mut app, 15, 2)?, "│           1     a│");
         assert_eq!(render_row(&mut app, 15, 3)?, "│           2     z│");
@@ -456,7 +459,7 @@ mod test {
         // height=9 → stack_area=3 rows → half=1 → at most 1 register row shown
         // even with 3 registers in 'a','b','c'
         let mut app = App::new(State::default())?;
-        app.add_extra("1 Sa 2 Sb 3 Sc")?;
+        app.add_extra("1 sa 2 sb 3 sc")?;
         // Row 1: top border, row 2: only 'a' shown (cap=1), row 3: bottom border
         assert_eq!(render_row(&mut app, 9, 2)?, "│           1     a│");
         assert_eq!(render_row(&mut app, 9, 3)?, "└ Registers ───────┘");
