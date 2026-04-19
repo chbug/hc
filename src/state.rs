@@ -1,6 +1,7 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     env,
     fs::{self, File},
     io::Write,
@@ -14,6 +15,10 @@ use crate::stack::Stack;
 pub struct State {
     pub stack: Vec<String>,
     pub precision: Option<u64>,
+    #[serde(default)]
+    pub output_base: Option<u32>,
+    #[serde(default)]
+    pub registers: HashMap<char, String>,
 }
 
 impl From<&Stack> for State {
@@ -21,6 +26,12 @@ impl From<&Stack> for State {
         State {
             stack: stack.snapshot().iter().map(|v| v.to_string()).collect(),
             precision: Some(stack.precision()),
+            output_base: Some(stack.output_base()),
+            registers: stack
+                .registers()
+                .iter()
+                .map(|(&k, v)| (k, v.to_string()))
+                .collect(),
         }
     }
 }

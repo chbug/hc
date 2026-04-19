@@ -62,6 +62,10 @@ where
     pub fn cur(&self) -> &T {
         &(self.history[self.current])
     }
+
+    pub fn cur_mut(&mut self) -> &mut T {
+        &mut (self.history[self.current])
+    }
 }
 
 /// Instantaneous stack, without undo/redo support. This is the
@@ -246,6 +250,11 @@ impl Stack {
     pub fn output_base(&self) -> u32 {
         self.stack.cur().output_base
     }
+
+    // Return the current registers.
+    pub fn registers(&self) -> &HashMap<char, BigDecimal> {
+        &self.stack.cur().registers
+    }
 }
 
 impl TryFrom<State> for Stack {
@@ -256,7 +265,15 @@ impl TryFrom<State> for Stack {
         for v in value.stack {
             values.push(BigDecimal::from_str(&v)?);
         }
-        Ok(Stack::from(values, value.precision))
+        let mut stack = Stack::from(values, value.precision);
+        let cur = stack.stack.cur_mut();
+        if let Some(base) = value.output_base {
+            cur.output_base = base;
+        }
+        for (k, v) in value.registers {
+            cur.registers.insert(k, BigDecimal::from_str(&v)?);
+        }
+        Ok(stack)
     }
 }
 
