@@ -11,24 +11,28 @@ This is a toy app that fulfills my personal needs, but I'm open to PR :)
 
 ## Operations
 
-- `+`, `-`, `*`, `/` : perform the arithmetic operation on the top two values.
-- `%` : compute the modulo of the second value divided by the first.
-- `^` : raise the second value to the power of the first.
-- `P` : pop the top value off the stack.
-- `d` : duplicate the top value.
-- `v` : compute the square root of the top value.
-- `k` : pop the top value and use it to set the precision.
-- `r` : swap the first two values.
+Operators manipulate the stack of values [S1, S2, ...]:
+
+- `+`, `-`, `*`, `/` : perform the arithmetic operation on S2 and S1.
+- `%` : compute the modulo of S2 divided by S1.
+- `^` : raise S2 to the power of S1.
+- `P` : pop S1 off the stack.
+- `d` : duplicate S1.
+- `v` : compute the square root of S1.
+- `k` : pop S1 and use it to set the precision.
+- `o` : pop S1 and use it to set the output base (2–36).
+- `r` : swap S1 and S2.
 - `u` : undo the last operation.
 - `U` : redo the last undone operation.
-- `s` : pop S1 and save it to a named register (prompts for a key)
-- `l` : load a named register onto the stack (prompts for a key)
-- `c` : clear the stack
-- `C` : clear all registers
-- `y` : rotate stack forward (S1→S2→S3→…→S1)
-- `Y` : rotate stack backward (S1→…→S3→S2→S1)
+- `s` : pop S1 and save it to a named register (prompts for a key).
+- `l` : load a named register onto the stack (prompts for a key).
+- `c` : clear the stack.
+- `C` : clear the registers.
+- `n` : reset precision and output base.
+- `y` : rotate stack forward (S1→S2→S3→…→S1).
+- `Y` : rotate stack backward (S1→…→S3→S2→S1).
 - `'` : toggle decimal separator.
-- `[Up]`: edit the value at the top of the stack.
+- `[Up]`: edit S1.
 
 ## Negative numbers
 

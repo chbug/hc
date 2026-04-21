@@ -90,7 +90,7 @@ impl InstantStack {
         InstantStack {
             stack,
             precision,
-            output_base: 10,
+            output_base: DEFAULT_BASE,
             registers: HashMap::new(),
         }
     }
@@ -172,6 +172,7 @@ pub enum Op {
     Load(char),
     ClearRegisters,
     ClearStack,
+    Defaults,
     Permutation(bool),
     Undo,
     Redo,
@@ -180,7 +181,9 @@ pub enum Op {
 // Arbitrarily cap exponentiation to that number of bits to avoid
 // slow computations (that are likely to be accidental anyways).
 const MAX_BIT_COUNT: u64 = 1024;
+
 const DEFAULT_PRECISION: u64 = 12;
+const DEFAULT_BASE: u32 = 10;
 
 impl Stack {
     #[cfg(test)]
@@ -410,6 +413,10 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
         }
         Op::ClearStack => {
             s.stack.clear();
+        }
+        Op::Defaults => {
+            s.precision = DEFAULT_PRECISION;
+            s.output_base = DEFAULT_BASE;
         }
         Op::Permutation(forward) => {
             if s.stack.len() >= 2 {
@@ -656,6 +663,21 @@ mod stack_tests {
             s.apply(Op::Load('z')),
             Err(StackError::InvalidArgument("register 'z' is empty".into()))
         );
+    }
+
+    #[test]
+    fn defaults() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(5.into()))?;
+        s.apply(Op::Precision)?;
+        s.apply(Op::Push(16.into()))?;
+        s.apply(Op::OutputBase)?;
+        assert_eq!(s.precision(), 5);
+        assert_eq!(s.output_base(), 16);
+        s.apply(Op::Defaults)?;
+        assert_eq!(s.precision(), DEFAULT_PRECISION);
+        assert_eq!(s.output_base(), DEFAULT_BASE);
+        Ok(())
     }
 
     #[test]

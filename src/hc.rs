@@ -70,6 +70,7 @@ impl App {
                 ('u', Op::Undo),
                 ('U', Op::Redo),
                 ('c', Op::ClearStack),
+                ('n', Op::Defaults),
                 ('C', Op::ClearRegisters),
                 ('y', Op::Permutation(true)),
                 ('Y', Op::Permutation(false)),
