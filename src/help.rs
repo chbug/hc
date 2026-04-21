@@ -124,8 +124,23 @@ fn help() -> Text<'static> {
         ]),
         Line::from(vec![
             Span::raw("  "),
+            "c".blue(),
+            Span::raw(" : clear the stack"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
             "C".blue(),
             Span::raw(" : clear all registers"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "y".blue(),
+            Span::raw(" : rotate stack forward (S1→S2→S3→…→S1)"),
+        ]),
+        Line::from(vec![
+            Span::raw("  "),
+            "Y".blue(),
+            Span::raw(" : rotate stack backward (S1→…→S3→S2→S1)"),
         ]),
         Line::from(vec![
             Span::raw("  "),

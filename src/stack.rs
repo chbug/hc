@@ -1,4 +1,7 @@
-use std::{collections::{HashMap, VecDeque}, str::FromStr};
+use std::{
+    collections::{HashMap, VecDeque},
+    str::FromStr,
+};
 
 use bigdecimal::{num_bigint::BigInt, BigDecimal, ParseBigDecimalError, Pow, ToPrimitive, Zero};
 use thiserror::Error;
@@ -164,10 +167,12 @@ pub enum Op {
     Pop,
     Precision,
     OutputBase,
-    Rotate,
+    Swap,
     Save(char),
     Load(char),
     ClearRegisters,
+    ClearStack,
+    Permutation(bool),
     Undo,
     Redo,
 }
@@ -381,10 +386,7 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
         }
         Op::OutputBase => {
             let [a] = s.check_and_pop(|stack: &[BigDecimal; 1]| {
-                if !stack[0].is_integer()
-                    || stack[0] < 2
-                    || stack[0] > 36
-                {
+                if !stack[0].is_integer() || stack[0] < 2 || stack[0] > 36 {
                     Err(StackError::InvalidArgument(
                         "base must be an integer between 2 and 36".into(),
                     ))
@@ -394,7 +396,7 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
             })?;
             s.output_base = a.to_u32().unwrap();
         }
-        Op::Rotate => {
+        Op::Swap => {
             let [a, b] = s.pop()?;
             s.push_front(b);
             s.push_front(a);
@@ -406,16 +408,28 @@ fn apply_on_stack(s: &mut InstantStack, op: Op) -> Result<(), StackError> {
         Op::ClearRegisters => {
             s.registers.clear();
         }
-        Op::Load(reg) => {
-            match s.registers.get(&reg).cloned() {
-                Some(v) => s.push_front(v),
-                None => {
-                    return Err(StackError::InvalidArgument(format!(
-                        "register '{reg}' is empty"
-                    )))
+        Op::ClearStack => {
+            s.stack.clear();
+        }
+        Op::Permutation(forward) => {
+            if s.stack.len() >= 2 {
+                if forward {
+                    let top = s.stack.pop_front().unwrap();
+                    s.stack.push_back(top);
+                } else {
+                    let bottom = s.stack.pop_back().unwrap();
+                    s.stack.push_front(bottom);
                 }
             }
         }
+        Op::Load(reg) => match s.registers.get(&reg).cloned() {
+            Some(v) => s.push_front(v),
+            None => {
+                return Err(StackError::InvalidArgument(format!(
+                    "register '{reg}' is empty"
+                )))
+            }
+        },
     }
     Ok(())
 }
@@ -593,7 +607,7 @@ mod stack_tests {
         let mut s = Stack::new();
         s.apply(Op::Push(1.into()))?;
         s.apply(Op::Push(2.into()))?;
-        s.apply(Op::Rotate)?;
+        s.apply(Op::Swap)?;
         assert_eq!(s.snapshot(), vec![BigDecimal::from(1), BigDecimal::from(2)]);
         Ok(())
     }
@@ -642,6 +656,51 @@ mod stack_tests {
             s.apply(Op::Load('z')),
             Err(StackError::InvalidArgument("register 'z' is empty".into()))
         );
+    }
+
+    #[test]
+    fn permutation_forward() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(1.into()))?;
+        s.apply(Op::Push(2.into()))?;
+        s.apply(Op::Push(3.into()))?;
+        s.apply(Op::Permutation(true))?;
+        assert_eq!(
+            s.snapshot(),
+            vec![
+                BigDecimal::from(2),
+                BigDecimal::from(1),
+                BigDecimal::from(3)
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn permutation_backward() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(1.into()))?;
+        s.apply(Op::Push(2.into()))?;
+        s.apply(Op::Push(3.into()))?;
+        s.apply(Op::Permutation(false))?;
+        assert_eq!(
+            s.snapshot(),
+            vec![
+                BigDecimal::from(1),
+                BigDecimal::from(3),
+                BigDecimal::from(2)
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn permutation_single_noop() -> Result<(), StackError> {
+        let mut s = Stack::new();
+        s.apply(Op::Push(42.into()))?;
+        s.apply(Op::Permutation(true))?;
+        assert_eq!(s.snapshot(), vec![BigDecimal::from(42)]);
+        Ok(())
     }
 
     #[test]

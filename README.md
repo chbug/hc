@@ -23,7 +23,10 @@ This is a toy app that fulfills my personal needs, but I'm open to PR :)
 - `U` : redo the last undone operation.
 - `s` : pop S1 and save it to a named register (prompts for a key)
 - `l` : load a named register onto the stack (prompts for a key)
+- `c` : clear the stack
 - `C` : clear all registers
+- `y` : rotate stack forward (S1→S2→S3→…→S1)
+- `Y` : rotate stack backward (S1→…→S3→S2→S1)
 - `'` : toggle decimal separator.
 - `[Up]`: edit the value at the top of the stack.
 
